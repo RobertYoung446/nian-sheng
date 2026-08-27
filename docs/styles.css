@@ -1317,6 +1317,7 @@ a:focus-visible {
 .ocean-nodes {
   position: absolute;
   inset: 0;
+  transform-origin: 0 0;
 }
 .ozone.dim {
   opacity: 0.25;

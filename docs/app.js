@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-6（关系海语义重构版）");
+console.log("[念生] app.js 版本 20260827-7（关系海滚轮缩放）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -872,7 +872,7 @@ let oceanState = null;
 async function openOcean() {
   if (document.querySelector("#ocean")) return;
   const list = shownIdeas();
-  modalRoot.innerHTML = `<section class="ocean" id="ocean"><canvas></canvas><div class="ocean-grain"></div><div class="ocean-viewport"><svg class="ocean-svg" id="oceanSvg"></svg><div class="ocean-nodes" id="oceanNodes"></div></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住海面拖动 · 悬停想法查看关系 · 点击查看详情</p></div><div class="engine-state"><i></i><b id="oceanStatus">${ai.apiKey ? "AI 正在分析想法结构…" : "本地模式 · 按标签聚类"}</b></div><button class="panel-toggle pressable" data-action="ocean-panel">洞察</button><button class="close pressable" data-action="close-ocean">×</button></header><div class="ocean-legend" id="oceanLegend" hidden></div><aside class="ocean-panel glass" id="oceanPanel"></aside><div class="ocean-hint glass" id="oceanHint" hidden></div><div class="drag-hint">拖动海面漫游 · 右侧洞察面板可跳转聚焦</div></section>`;
+  modalRoot.innerHTML = `<section class="ocean" id="ocean"><canvas></canvas><div class="ocean-grain"></div><div class="ocean-viewport"><svg class="ocean-svg" id="oceanSvg"></svg><div class="ocean-nodes" id="oceanNodes"></div></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住海面拖动 · 悬停想法查看关系 · 点击查看详情</p></div><div class="engine-state"><i></i><b id="oceanStatus">${ai.apiKey ? "AI 正在分析想法结构…" : "本地模式 · 按标签聚类"}</b></div><button class="panel-toggle pressable" data-action="ocean-panel">洞察</button><button class="close pressable" data-action="close-ocean">×</button></header><div class="ocean-legend" id="oceanLegend" hidden></div><aside class="ocean-panel glass" id="oceanPanel"></aside><div class="ocean-hint glass" id="oceanHint" hidden></div><div class="drag-hint">拖动漫游 · 滚轮缩放 · 右侧洞察面板可跳转聚焦</div></section>`;
   const oceanEl = document.querySelector("#ocean");
   const canvas = oceanEl.querySelector("canvas");
   rememberFocus();
@@ -890,6 +890,7 @@ async function openOcean() {
     advice: "",
     modelDone: false,
     pan: { x: 0, y: 0 },
+    zoom: 1,
     drag: null,
     pointer: { x: innerWidth / 2, y: innerHeight / 2 },
     focus: null,
@@ -948,6 +949,28 @@ async function openOcean() {
     applyOceanPan();
   };
   const up = () => (oceanState.drag = null);
+  const wheel = (event) => {
+    if (
+      event.target.closest(".ocean-panel") ||
+      event.target.closest(".ocean-toolbar") ||
+      event.target.closest(".ocean-legend") ||
+      event.target.closest(".ocean-hint")
+    )
+      return;
+    event.preventDefault();
+    const st = oceanState;
+    if (!st) return;
+    const cx = event.clientX - st.viewW / 2;
+    const cy = event.clientY - st.viewH / 2;
+    const worldX = (cx - st.pan.x) / st.zoom;
+    const worldY = (cy - st.pan.y) / st.zoom;
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const zoom = Math.max(0.4, Math.min(2.5, st.zoom * factor));
+    if (zoom === st.zoom) return;
+    st.zoom = zoom;
+    st.pan = { x: cx - worldX * zoom, y: cy - worldY * zoom };
+    applyOceanPan();
+  };
   const over = (event) => {
     if (event.pointerType && event.pointerType !== "mouse") return;
     const node = event.target.closest(".ocean-node");
@@ -962,6 +985,7 @@ async function openOcean() {
   oceanEl.addEventListener("pointerdown", down);
   oceanEl.addEventListener("pointermove", move);
   oceanEl.addEventListener("pointerup", up);
+  oceanEl.addEventListener("wheel", wheel, { passive: false });
   oceanEl.addEventListener("pointerover", over);
   oceanEl.addEventListener("pointerout", out);
   let frame = 0;
@@ -1256,10 +1280,10 @@ function applyOceanPan() {
   if (layer)
     layer.setAttribute(
       "transform",
-      `translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y})`,
+      `translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y}) scale(${st.zoom})`,
     );
   if (nodes)
-    nodes.style.transform = `translate(${st.viewW / 2 + st.pan.x}px, ${st.viewH / 2 + st.pan.y}px)`;
+    nodes.style.transform = `translate(${st.viewW / 2 + st.pan.x}px, ${st.viewH / 2 + st.pan.y}px) scale(${st.zoom})`;
 }
 function renderOceanWorld() {
   const st = oceanState;
@@ -1299,7 +1323,7 @@ function renderOceanWorld() {
       return `<path class="oedge ${dim ? "dim" : ""}" data-edge="${i}" d="M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}" stroke="${color}" stroke-width="${width}" fill="none"></path>${label ? `<text class="elabel" x="${cx}" y="${cy - 4}" text-anchor="middle" fill="${color}">${esc(edge.type)}</text>` : ""}`;
     })
     .join("");
-  svg.innerHTML = `<g id="oceanLayer" transform="translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y})">${zoneMarkup}${edgeMarkup}</g>`;
+  svg.innerHTML = `<g id="oceanLayer" transform="translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y}) scale(${st.zoom})">${zoneMarkup}${edgeMarkup}</g>`;
   nodesBox.innerHTML = st.list
     .map((idea) => {
       const p = st.pos.get(idea.id);
@@ -1438,7 +1462,7 @@ function centerOnOceanNode(id) {
   const st = oceanState;
   const p = st?.pos.get(id);
   if (!p) return;
-  st.pan = { x: -p.x, y: -p.y };
+  st.pan = { x: -p.x * st.zoom, y: -p.y * st.zoom };
   applyOceanPan();
 }
 function drawOcean(ctx, w, h, t, pointer) {
