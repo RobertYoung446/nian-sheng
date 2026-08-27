@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-3（讨论区模型直连版）");
+console.log("[念生] app.js 版本 20260827-4（展开质疑直达聊天）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -200,7 +200,7 @@ function renderToday() {
       list.find((item) =>
         ["行动中", "待验证", "计划中"].includes(item.status),
       ) || list[0];
-  view.innerHTML = `<div class="welcome"><span>✦</span><p>${ideas.length ? `你已经留下 ${ideas.length} 个真实想法。今天选择一个最小动作就好。` : "这是无需登录的公开独立版。先记录一个最近反复出现的念头。"}</p></div><section class="capture-card"><div class="capture-head"><span>✦</span><div><h2>捕捉刚刚闪过的念头</h2><p>不用整理，先把它留下来</p></div></div><textarea id="ideaDraft" placeholder="我刚想到……" aria-label="记录新想法"></textarea><div class="capture-footer"><span>数据保存在当前浏览器；连接模型后会自动深入分析</span><button class="primary pressable" data-action="save-idea">收进灵感箱</button></div></section><div class="section-heading"><div><h2>此刻最值得推进</h2><p>根据可行性、影响力与状态整理</p></div><button data-action="open-idea" data-id="${esc(focus.id)}">查看完整分析 →</button></div><section class="focus-card"><div class="focus-main"><div class="eyebrow"><span>本周焦点</span><small>${esc(focus.status)}</small></div><h2>${esc(focus.title)}</h2><p>${esc(focus.summary)}</p>${metric("想法成熟度", focus.confidence)}<div class="next-action"><span>下一步最小行动</span><p>${esc(focus.nextAction)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}">开始行动 →</button></div></div><aside class="ai-note"><span>✦</span><small>思考伙伴的提醒</small><h3>别急着证明它是对的</h3><p>${esc(focus.risk)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}">展开质疑</button></aside></section><div class="section-heading"><div><h2>最近的想法</h2><p>${list.length} 个方向正在等待选择</p></div></div><section class="idea-grid">${list.slice(0, 3).map(ideaCard).join("")}</section>`;
+  view.innerHTML = `<div class="welcome"><span>✦</span><p>${ideas.length ? `你已经留下 ${ideas.length} 个真实想法。今天选择一个最小动作就好。` : "这是无需登录的公开独立版。先记录一个最近反复出现的念头。"}</p></div><section class="capture-card"><div class="capture-head"><span>✦</span><div><h2>捕捉刚刚闪过的念头</h2><p>不用整理，先把它留下来</p></div></div><textarea id="ideaDraft" placeholder="我刚想到……" aria-label="记录新想法"></textarea><div class="capture-footer"><span>数据保存在当前浏览器；连接模型后会自动深入分析</span><button class="primary pressable" data-action="save-idea">收进灵感箱</button></div></section><div class="section-heading"><div><h2>此刻最值得推进</h2><p>根据可行性、影响力与状态整理</p></div><button data-action="open-idea" data-id="${esc(focus.id)}">查看完整分析 →</button></div><section class="focus-card"><div class="focus-main"><div class="eyebrow"><span>本周焦点</span><small>${esc(focus.status)}</small></div><h2>${esc(focus.title)}</h2><p>${esc(focus.summary)}</p>${metric("想法成熟度", focus.confidence)}<div class="next-action"><span>下一步最小行动</span><p>${esc(focus.nextAction)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}">开始行动 →</button></div></div><aside class="ai-note"><span>✦</span><small>思考伙伴的提醒</small><h3>别急着证明它是对的</h3><p>${esc(focus.risk)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}" data-tab="talk">展开质疑</button></aside></section><div class="section-heading"><div><h2>最近的想法</h2><p>${list.length} 个方向正在等待选择</p></div></div><section class="idea-grid">${list.slice(0, 3).map(ideaCard).join("")}</section>`;
 }
 function renderInbox() {
   const list = shownIdeas();
@@ -479,14 +479,15 @@ function fallbackEdges(list) {
   return edges;
 }
 
-function openIdea(id) {
+function openIdea(id, tab = "analysis") {
   const idea = shownIdeas().find((item) => item.id === id);
   if (!idea) return;
   selectedId = id;
-  selectedTab = "analysis";
+  selectedTab = tab;
   chatMessages = [];
   chatThinking = false;
   renderIdeaSheet(idea);
+  if (tab === "talk" && ai.apiKey && !chatThinking) generateOpener(idea);
 }
 function rememberFocus() {
   if (!modalRoot.childElementCount) lastFocusedNode = document.activeElement;
@@ -816,7 +817,11 @@ document.addEventListener("click", (event) => {
     setTimeout(() => document.querySelector("#ideaDraft")?.focus(), 0);
   }
   if (action === "save-idea") saveDraft();
-  if (action === "open-idea") openIdea(target.dataset.id);
+  if (action === "open-idea")
+    openIdea(
+      target.dataset.id,
+      target.dataset.tab === "talk" ? "talk" : "analysis",
+    );
   if (action === "close-modal") {
     const bubbledFromContent =
       target.classList.contains("scrim") && event.target !== target;
