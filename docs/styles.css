@@ -1572,6 +1572,27 @@ a:focus-visible {
   font-size: 12px;
   font-weight: 720;
 }
+.fireworks {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  pointer-events: none;
+}
+.danger {
+  background: #b3423a !important;
+}
+.made-by {
+  margin-top: 10px;
+  color: #93a49a;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-align: center;
+}
+.workspace > .made-by {
+  margin: 36px 0 0;
+  text-align: right;
+  font-size: 10px;
+}
 .ocean-grain {
   pointer-events: none;
   opacity: 0.19;

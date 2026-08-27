@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-7（关系海滚轮缩放）");
+console.log("[念生] app.js 版本 20260827-8（双击删除 / 完成烟花 / 署名）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -87,6 +87,7 @@ let toastTimer;
 let oceanCleanup = null;
 let lastFocusedNode = null;
 let chatThinking = false;
+let cardClickTimer = null;
 let research = {
   ideaId: null,
   query: "",
@@ -494,6 +495,83 @@ function closeModal() {
   modalRoot.innerHTML = "";
   selectedId = null;
   restoreFocus();
+}
+function confirmDelete(idea) {
+  rememberFocus();
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>DELETE IDEA</span><h2>删除这个想法？</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>${esc(idea.title)}</p><p>删除后无法恢复。如果只是暂时不做，建议改为「已搁置」。</p><footer><button data-action="close-modal">取消</button><button class="primary danger pressable" data-action="delete-idea" data-id="${esc(idea.id)}">确认删除</button></footer></section></div>`;
+  modalRoot.querySelector(".close")?.focus();
+}
+function celebrate() {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const canvas = document.createElement("canvas");
+  canvas.className = "fireworks";
+  document.body.appendChild(canvas);
+  let ctx = null;
+  try {
+    ctx = canvas.getContext("2d");
+  } catch {
+    ctx = null;
+  }
+  if (!ctx) {
+    canvas.remove();
+    return;
+  }
+  const dpr = Math.min(devicePixelRatio, 2);
+  canvas.width = innerWidth * dpr;
+  canvas.height = innerHeight * dpr;
+  canvas.style.width = `${innerWidth}px`;
+  canvas.style.height = `${innerHeight}px`;
+  ctx.scale(dpr, dpr);
+  const colors = ["#f6b352", "#ef7d54", "#4fae7d", "#5b8fd9", "#c86bd9"];
+  const parts = [];
+  for (let burst = 0; burst < 3; burst++) {
+    const bx = innerWidth * (0.3 + Math.random() * 0.4);
+    const by = innerHeight * (0.22 + Math.random() * 0.26);
+    const count = 40;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const speed = 2.4 + Math.random() * 3.4;
+      parts.push({
+        x: bx,
+        y: by,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        delay: burst * 220,
+        color: colors[(i + burst) % colors.length],
+        size: 1.6 + Math.random() * 2.2,
+      });
+    }
+  }
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = now - t0;
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    let alive = false;
+    parts.forEach((p) => {
+      const lt = t - p.delay;
+      if (lt < 0) {
+        alive = true;
+        return;
+      }
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.vx *= 0.985;
+      p.life -= 0.011;
+      if (p.life <= 0) return;
+      alive = true;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (alive) requestAnimationFrame(step);
+    else canvas.remove();
+  };
+  requestAnimationFrame(step);
 }
 function sheetStillOpen() {
   return Boolean(modalRoot.querySelector(".sheet"));
@@ -1515,11 +1593,16 @@ document.addEventListener("click", (event) => {
     setTimeout(() => document.querySelector("#ideaDraft")?.focus(), 0);
   }
   if (action === "save-idea") saveDraft();
-  if (action === "open-idea")
-    openIdea(
-      target.dataset.id,
-      target.dataset.tab === "talk" ? "talk" : "analysis",
-    );
+  if (action === "open-idea") {
+    const tab = target.dataset.tab === "talk" ? "talk" : "analysis";
+    if (target.closest(".idea-card")) {
+      clearTimeout(cardClickTimer);
+      const id = target.dataset.id;
+      cardClickTimer = setTimeout(() => openIdea(id, tab), 260);
+    } else {
+      openIdea(target.dataset.id, tab);
+    }
+  }
   if (action === "close-modal") {
     const bubbledFromContent =
       target.classList.contains("scrim") && event.target !== target;
@@ -1573,6 +1656,16 @@ document.addEventListener("click", (event) => {
   if (action === "research-summary") {
     const idea = shownIdeas().find((item) => item.id === selectedId);
     if (idea) summarizeSelected(idea);
+  }
+  if (action === "delete-idea") {
+    const index = ideas.findIndex((item) => item.id === target.dataset.id);
+    if (index >= 0) {
+      const [removed] = ideas.splice(index, 1);
+      saveIdeas();
+      closeModal();
+      render(currentView);
+      toast(`已删除「${removed.title.slice(0, 14)}」`);
+    }
   }
   if (action === "save-ai") saveAi();
   if (action === "open-ocean") openOcean();
@@ -1633,6 +1726,18 @@ document.addEventListener("keydown", (event) => {
   }
   if (modalRoot.querySelector(".scrim")) closeModal();
 });
+document.addEventListener("dblclick", (event) => {
+  const card = event.target.closest(".idea-card");
+  if (!card) return;
+  event.preventDefault();
+  clearTimeout(cardClickTimer);
+  const idea = ideas.find((item) => item.id === card.dataset.id);
+  if (!idea) {
+    toast("这是体验示例，记录自己的想法后即可管理");
+    return;
+  }
+  confirmDelete(idea);
+});
 document.querySelector("#aiButton").addEventListener("click", showAiSettings);
 function changeStatus(id, status) {
   const idea = ideas.find((item) => item.id === id);
@@ -1644,6 +1749,7 @@ function changeStatus(id, status) {
   idea.updatedAt = Date.now();
   saveIdeas();
   toast(`已进入「${status}」`);
+  if (status === "已完成") celebrate();
 }
 
 updateChrome();
