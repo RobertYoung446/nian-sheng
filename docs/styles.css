@@ -2101,3 +2101,9 @@ a:focus-visible {
   color: #718078;
   font-size: 12px;
 }
+.query-note {
+  margin: 8px 0 2px;
+  color: #8b9690;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}

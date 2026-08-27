@@ -1,7 +1,7 @@
 const STORAGE_KEY = "niansheng-public-v1";
 const STORAGE_BACKUP = "niansheng-public-backup-v1";
 const AI_STORAGE_KEY = "niansheng-ai-config-v1";
-console.log("[念生] app.js 版本 20260827-10（可选记住密钥）");
+console.log("[念生] app.js 版本 20260827-11（多角度检索与相关性过滤）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -103,6 +103,7 @@ try {
 let research = {
   ideaId: null,
   query: "",
+  usedQueries: [],
   loading: false,
   error: null,
   items: [],
@@ -480,6 +481,7 @@ function openIdea(id, tab = "analysis") {
     research = {
       ideaId: id,
       query: idea.title || "",
+      usedQueries: [],
       loading: false,
       error: null,
       items: [],
@@ -778,10 +780,10 @@ function researchTabContent(idea) {
     : research.items;
   const checkedCount = research.items.filter((item) => item.checked).length;
   const list = research.loading
-    ? `<div class="loading-line">正在检索「${esc(research.query)}」的相关新闻……</div>`
+    ? `<div class="loading-line">正在检索「${esc(research.query)}」……${research.usedQueries.length > 1 ? `<br><span class="query-note">检索角度：${research.usedQueries.map((q) => esc(q)).join(" · ")}</span>` : ""}</div>`
     : research.error
       ? `<div class="research-error">检索失败：${esc(research.error)}。可以直接 <a href="https://www.bing.com/news/search?q=${encodeURIComponent(research.query)}" target="_blank" rel="noopener">在 Bing 打开检索结果 ↗</a></div>`
-      : `<div class="tag-bar">${tagChips}</div>${
+      : `${research.usedQueries.length ? `<div class="query-note">检索角度：${research.usedQueries.map((q) => esc(q)).join(" · ")}　·　${research.items.length} 条结果</div>` : ""}<div class="tag-bar">${tagChips}</div>${
           visible.length
             ? visible
                 .map((item) => {
@@ -795,7 +797,7 @@ function researchTabContent(idea) {
     research.loading || research.error
       ? ""
       : `<div class="research-foot"><button data-action="research-all">全选</button><button data-action="research-clear">清空</button><span class="spacer"></span><button class="primary pressable" data-action="research-summary" ${research.summarizing || !checkedCount ? "disabled" : ""}>${research.summarizing ? "正在总结……" : `AI 总结选中（${checkedCount}）`}</button></div>`;
-  return `<section class="analysis-summary"><span>LIVE RESEARCH</span><p>输入关键词，在这里直接查看该想法的最新公开进展；结果自带 # 标签，点击标签可筛选，勾选后可让 AI 一键总结。</p></section><div class="research-bar"><input id="researchQuery" value="${esc(research.query)}" placeholder="检索关键词" aria-label="检索关键词"><button class="primary pressable" data-action="research-search" ${research.loading ? "disabled" : ""}>${research.loading ? "检索中…" : "检索"}</button></div>${research.summary ? `<div class="summary-box"><small>✦ AI 总结</small>${esc(research.summary)}</div>` : ""}${list}${foot}`;
+  return `<section class="analysis-summary"><span>LIVE RESEARCH</span><p>连接 AI 后会自动把你的想法拆解成多个检索角度，同时聚合新闻与网页结果、按时间排序，并过滤低相关内容；结果自带 # 标签，可筛选，勾选后可让 AI 一键总结。</p></section><div class="research-bar"><input id="researchQuery" value="${esc(research.query)}" placeholder="检索关键词" aria-label="检索关键词"><button class="primary pressable" data-action="research-search" ${research.loading ? "disabled" : ""}>${research.loading ? "检索中…" : "检索"}</button></div>${research.summary ? `<div class="summary-box"><small>✦ AI 总结</small>${esc(research.summary)}</div>` : ""}${list}${foot}`;
 }
 async function fetchWithTimeout(url, ms = 15000) {
   const controller = new AbortController();
@@ -842,12 +844,12 @@ function parseRss(text) {
     };
   });
 }
-async function fetchNewsItems(query) {
-  const rss = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS`;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fetchFeed(url) {
   let lastError = new Error("网络检索失败");
   for (const build of RESEARCH_PROXIES) {
     try {
-      const response = await fetchWithTimeout(build(rss));
+      const response = await fetchWithTimeout(build(url));
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const items = parseRss(await response.text());
       if (items.length) return items;
@@ -859,14 +861,14 @@ async function fetchNewsItems(query) {
   try {
     const data = await (
       await fetchWithTimeout(
-        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rss)}`,
+        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}`,
       )
     ).json();
     const items = (data.items || []).map((item) => ({
       title: stripHtml(item.title || ""),
       link: item.link || "",
       snippet: stripHtml(item.description || item.content || ""),
-      source: item.author || "Bing 新闻",
+      source: item.author || "Bing",
       date: item.pubDate || "",
     }));
     if (items.length) return items;
@@ -875,6 +877,67 @@ async function fetchNewsItems(query) {
   }
   throw lastError;
 }
+async function fetchNewsItems(query) {
+  const enc = encodeURIComponent(query);
+  const feeds = [
+    `https://www.bing.com/news/search?q=${enc}&format=RSS`,
+    `https://www.bing.com/search?q=${enc}&format=rss&count=15`,
+  ];
+  const settled = await Promise.allSettled(
+    feeds.map((feed) => fetchFeed(feed)),
+  );
+  const seen = new Set();
+  const merged = [];
+  settled.forEach((result) => {
+    if (result.status !== "fulfilled") return;
+    result.value.forEach((item) => {
+      const titleKey = (item.title || "").replace(/\s+/g, "").toLowerCase();
+      if (!titleKey || seen.has(titleKey) || seen.has(item.link)) return;
+      seen.add(titleKey);
+      if (item.link) seen.add(item.link);
+      merged.push(item);
+    });
+  });
+  if (!merged.length) {
+    const firstFailure = settled.find((r) => r.status === "rejected");
+    if (firstFailure) throw firstFailure.reason;
+    throw new Error("没有检索到结果");
+  }
+  return merged;
+}
+async function generateSearchQueries(idea) {
+  const reply = await callModel(
+    [
+      {
+        role: "system",
+        content:
+          '你是检索专家。只返回JSON：{"queries":["搜索词",...]}。为这个想法生成4个不同的中文搜索词（每个不超过10个字），分别覆盖：产品与技术动态、竞品与替代方案、用户需求场景、市场与行业情况。不要照抄想法标题，用普通用户会搜索的表达。',
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          title: idea.title,
+          content: (idea.content || "").slice(0, 120),
+          tags: idea.tags,
+        }),
+      },
+    ],
+    0.3,
+  );
+  const data = parseJson(reply);
+  return [
+    ...new Set(
+      (Array.isArray(data?.queries) ? data.queries : [])
+        .filter((q) => typeof q === "string" && q.trim())
+        .map((q) => q.trim().slice(0, 14)),
+    ),
+  ].slice(0, 4);
+}
+const normalizeTagList = (list) =>
+  (Array.isArray(list) ? list : [])
+    .filter((tag) => typeof tag === "string" && tag.trim())
+    .map((tag) => `#${tag.trim().replace(/^#/, "").slice(0, 12)}`)
+    .slice(0, 4);
 function heuristicTags(item, query) {
   const text = `${item.title} ${item.snippet}`;
   const tags = RESEARCH_TAG_RULES.filter(([, regex]) => regex.test(text)).map(
@@ -886,67 +949,115 @@ function heuristicTags(item, query) {
 }
 async function startResearch(idea) {
   const input = document.querySelector("#researchQuery");
-  const query = (input?.value.trim() || research.query || idea.title || "")
+  const rawQuery = (input?.value.trim() || research.query || idea.title || "")
     .trim()
     .slice(0, 60);
-  research.query = query;
+  research.query = rawQuery;
+  research.usedQueries = [];
   research.loading = true;
   research.error = null;
   research.items = [];
   research.activeTag = null;
   research.summary = "";
   renderIdeaSheet(idea);
-  try {
-    research.items = await fetchNewsItems(query);
+  let queries = [rawQuery];
+  if (ai.apiKey) {
+    try {
+      const aiQueries = await generateSearchQueries(idea);
+      if (aiQueries.length) queries = aiQueries;
+    } catch {}
+  }
+  research.usedQueries = queries;
+  renderIdeaSheet(idea);
+  const settled = await Promise.allSettled(
+    queries.map((query, index) =>
+      delay(index * 150).then(() => fetchNewsItems(query)),
+    ),
+  );
+  const seen = new Set();
+  const merged = [];
+  settled.forEach((result) => {
+    if (result.status !== "fulfilled") return;
+    result.value.forEach((item) => {
+      const titleKey = (item.title || "").replace(/\s+/g, "").toLowerCase();
+      if (!titleKey || seen.has(titleKey) || seen.has(item.link)) return;
+      seen.add(titleKey);
+      if (item.link) seen.add(item.link);
+      merged.push(item);
+    });
+  });
+  if (!merged.length) {
+    const failure = settled.find((r) => r.status === "rejected");
+    research.error = failure?.reason?.message || "检索失败";
+  } else {
+    merged.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+    research.items = merged.slice(0, 40);
     research.items.forEach((item) => {
-      item.tags = heuristicTags(item, query);
+      item.tags = heuristicTags(item, rawQuery);
       item.checked = false;
     });
-  } catch (error) {
-    research.error = error?.message || "检索失败";
   }
   research.loading = false;
   if (sheetStillOpen()) renderIdeaSheet(idea);
-  if (research.items.length && ai.apiKey) tagItemsWithModel(idea);
+  if (research.items.length && ai.apiKey) refineTagsAndRelevance(idea);
 }
-async function tagItemsWithModel(idea) {
-  research.tagging = true;
+async function refineTagsAndRelevance(idea) {
+  const st = research;
+  if (!st.items.length) return;
+  st.tagging = true;
+  const before = st.items.length;
   try {
     const reply = await callModel(
       [
         {
           role: "system",
           content:
-            '你是新闻标注器。只返回JSON：{"tags":[["#标签","#标签"],...]}。按输入顺序为每条新闻给2-3个简短中文#标签（每个不超过6字，以#开头），标签应便于归纳主题。',
+            '你是新闻筛选与标注器。只返回JSON：{"keep":[索引,...],"tags":[["#标签","#标签"],...]}。判断每条结果是否与想法真正相关（产品、技术、竞品、用户需求、市场动态相关则保留；泛生活常识、穿搭建议类丢弃），keep只包含相关条目的索引。tags与keep一一对应，每个2-3个中文#标签（不超过6字，以#开头）。',
         },
         {
           role: "user",
           content: JSON.stringify({
             idea: idea.title,
-            items: research.items.map((item, index) => ({
+            need: (idea.content || "").slice(0, 80),
+            items: st.items.slice(0, 30).map((item, index) => ({
               i: index,
               t: item.title,
-              s: item.snippet.slice(0, 100),
+              s: item.snippet.slice(0, 90),
             })),
           }),
         },
       ],
       0.2,
     );
-    const parsed = parseJson(reply);
-    const tags = Array.isArray(parsed?.tags) ? parsed.tags : [];
-    research.items.forEach((item, index) => {
-      const candidate = tags[index];
-      if (Array.isArray(candidate) && candidate.length)
-        item.tags = candidate
-          .filter((tag) => typeof tag === "string" && tag.trim())
-          .map((tag) => `#${tag.trim().replace(/^#/, "").slice(0, 12)}`)
-          .slice(0, 4);
-    });
-  } catch {
-    research.tagging = false;
-  }
-  research.tagging = false;
+    const data = parseJson(reply);
+    const keep = Array.isArray(data?.keep)
+      ? data.keep.map(Number).filter((n) => Number.isInteger(n))
+      : null;
+    const tagQueue = Array.isArray(data?.tags)
+      ? data.tags.map(normalizeTagList)
+      : [];
+    if (keep) {
+      const relevant = [];
+      st.items.forEach((item, index) => {
+        const inPayload = index < 30;
+        if (inPayload && !keep.includes(index)) return;
+        const position = keep.indexOf(index);
+        const candidate =
+          inPayload && position >= 0 ? tagQueue[position] : null;
+        if (candidate && candidate.length) item.tags = candidate;
+        relevant.push(item);
+      });
+      if (relevant.length) st.items = relevant;
+    } else {
+      st.items.forEach((item, index) => {
+        const candidate = tagQueue[index];
+        if (candidate && candidate.length) item.tags = candidate;
+      });
+    }
+  } catch {}
+  st.tagging = false;
+  const removed = before - st.items.length;
+  if (removed > 0 && sheetStillOpen()) toast(`AI 已过滤 ${removed} 条低相关结果`);
   if (
     sheetStillOpen() &&
     selectedTab === "research" &&
