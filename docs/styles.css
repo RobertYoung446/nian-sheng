@@ -1298,10 +1298,278 @@ a:focus-visible {
   cursor: grabbing;
 }
 .ocean canvas,
-.ocean-world,
+.ocean-viewport,
 .ocean-grain {
   position: absolute;
   inset: 0;
+}
+.ocean-viewport {
+  will-change: transform;
+}
+.ocean-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.ocean-nodes {
+  position: absolute;
+  inset: 0;
+}
+.ozone.dim {
+  opacity: 0.25;
+}
+.zlabel {
+  fill: #2d5b45;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 4px;
+}
+.oedge {
+  stroke-linecap: round;
+  opacity: 0.55;
+  transition:
+    opacity 0.25s ease,
+    stroke-width 0.25s ease;
+}
+.oedge.hot {
+  opacity: 1;
+}
+.oedge.dim,
+.elabel.dim,
+.elabel.fade {
+  opacity: 0.07;
+}
+.oedge.fade {
+  opacity: 0.1;
+}
+.elabel {
+  font-size: 10px;
+  font-weight: 720;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.88);
+  stroke-width: 3px;
+  opacity: 0.95;
+}
+.ocean-node {
+  position: absolute;
+  width: 190px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 24px;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.78),
+    rgba(222, 245, 234, 0.48)
+  );
+  box-shadow:
+    0 20px 45px rgba(18, 76, 51, 0.18),
+    inset 0 1px 0 #fff;
+  backdrop-filter: blur(20px) saturate(155%);
+  text-align: left;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity 0.25s ease,
+    transform 0.3s var(--ease);
+}
+.ocean-node:hover {
+  transform: translate(-50%, -54%) scale(1.035);
+}
+.ocean-node.dim {
+  opacity: 0.28;
+  filter: grayscale(0.4);
+}
+.ocean-node.island {
+  border-style: dashed;
+}
+.ocean-node.island::after {
+  content: "孤岛";
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #ef9f68;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 750;
+}
+.ocean-legend {
+  position: absolute;
+  z-index: 6;
+  left: 22px;
+  right: 22px;
+  top: 122px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  pointer-events: auto;
+}
+.legend-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #2d5b45;
+  font-size: 11px;
+  font-weight: 720;
+}
+.legend-chip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.legend-chip.active {
+  background: #2e6b4e;
+  border-color: #2e6b4e;
+  color: #fff;
+}
+.ocean-panel {
+  position: absolute;
+  z-index: 6;
+  right: 22px;
+  top: 172px;
+  bottom: 24px;
+  width: 256px;
+  padding: 18px 16px;
+  border-radius: 20px;
+  overflow: auto;
+}
+.panel-head span {
+  color: #367353;
+  font-size: 8px;
+  letter-spacing: 0.15em;
+}
+.panel-head b {
+  display: block;
+  margin: 4px 0 0;
+  font: 600 15px var(--serif);
+}
+.panel-head p {
+  margin: 8px 0 0;
+  color: #4f6d5e;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.panel-sec {
+  margin-top: 15px;
+}
+.panel-sec small {
+  display: block;
+  margin-bottom: 7px;
+  color: #6c8377;
+  font-size: 10px;
+  font-weight: 720;
+}
+.panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 8px 10px;
+  border: 1px solid rgba(52, 100, 75, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.45);
+  color: #33594a;
+  font-size: 11px;
+  text-align: left;
+}
+.panel-row span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-row b {
+  flex: none;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #2e6b4e;
+  font-size: 10px;
+}
+.panel-row.active {
+  background: #2e6b4e;
+  border-color: #2e6b4e;
+  color: #fff;
+}
+.panel-row.active b {
+  color: #fff;
+}
+.panel-row.conflict {
+  border-color: rgba(197, 48, 48, 0.25);
+}
+.panel-row.island {
+  border-style: dashed;
+}
+.empty-tip {
+  margin: 0;
+  color: #8b9690;
+  font-size: 10px;
+}
+.panel-note {
+  margin-top: 15px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(43, 117, 82, 0.08);
+  color: #4f6d5e;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.ocean-hint {
+  position: absolute;
+  z-index: 6;
+  left: 22px;
+  bottom: 62px;
+  max-width: 330px;
+  padding: 14px 16px;
+  border-radius: 16px;
+}
+.ocean-hint small {
+  display: block;
+  margin-bottom: 8px;
+  color: #356b4e;
+  font-size: 11px;
+  font-weight: 720;
+}
+.hint-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #3c5b4b;
+  line-height: 1.55;
+}
+.hint-row i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.hint-row b {
+  flex: none;
+  font-size: 10px;
+}
+.panel-toggle {
+  padding: 9px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #2d5b45;
+  font-size: 12px;
+  font-weight: 720;
 }
 .ocean-grain {
   pointer-events: none;
@@ -1361,29 +1629,6 @@ a:focus-visible {
 .ocean-toolbar .close {
   margin-left: 16px;
 }
-.ocean-node {
-  position: absolute;
-  width: 190px;
-  min-height: 112px;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  border-radius: 24px;
-  background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.78),
-    rgba(222, 245, 234, 0.48)
-  );
-  box-shadow:
-    0 20px 45px rgba(18, 76, 51, 0.18),
-    inset 0 1px 0 #fff;
-  backdrop-filter: blur(20px) saturate(155%);
-  text-align: left;
-  transform: translate(-50%, -50%);
-  animation: oceanFloat 6s ease-in-out infinite;
-}
-.ocean-node:hover {
-  transform: translate(-50%, -54%) scale(1.035);
-}
 .ocean-node > span {
   color: #39755a;
   font-size: 10px;
@@ -1410,11 +1655,6 @@ a:focus-visible {
   border-radius: 50%;
   background: rgba(39, 119, 82, 0.12);
   font-size: 11px;
-}
-@keyframes oceanFloat {
-  50% {
-    margin-top: -13px;
-  }
 }
 @keyframes oceanEnter {
   from {
@@ -1536,6 +1776,21 @@ a:focus-visible {
   }
   .review-grid {
     grid-template-columns: 1fr;
+  }
+  .ocean-legend {
+    top: 108px;
+  }
+  .ocean-panel {
+    left: 10px;
+    right: 10px;
+    top: auto;
+    bottom: 10px;
+    width: auto;
+    max-height: 46vh;
+    display: none;
+  }
+  .ocean.panel-open .ocean-panel {
+    display: block;
   }
 }
 @media (max-width: 680px) {

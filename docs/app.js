@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-5（最新进展站内检索）");
+console.log("[念生] app.js 版本 20260827-6（关系海语义重构版）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -440,54 +440,6 @@ async function analyzeWithModel(content) {
   );
   return sanitizeAnalysis(parseJson(reply));
 }
-async function analyzeRelations(list) {
-  if (!ai.apiKey) return fallbackEdges(list);
-  const compact = list
-    .slice(0, 35)
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      content: item.content,
-      tags: item.tags,
-    }));
-  const reply = await callModel(
-    [
-      {
-        role: "system",
-        content:
-          '分析想法的语义和逻辑关系。只返回JSON：{"edges":[{"sourceId":"","targetId":"","type":"相似|依赖|先后|包含|互补|冲突|资源复用","reason":"20字内原因","strength":0到1}]}。只能使用提供的ID，每个想法最多3条边。',
-      },
-      { role: "user", content: JSON.stringify(compact) },
-    ],
-    0.2,
-  );
-  return parseJson(reply).edges || [];
-}
-function fallbackEdges(list) {
-  const edges = [];
-  for (let i = 0; i < list.length; i++)
-    for (let j = i + 1; j < list.length; j++) {
-      const shared = list[i].tags.filter((tag) => list[j].tags.includes(tag));
-      if (shared.length)
-        edges.push({
-          sourceId: list[i].id,
-          targetId: list[j].id,
-          type: "主题相似",
-          reason: `共享${shared.join("、")}`,
-          strength: 0.68,
-        });
-    }
-  if (!edges.length && list.length > 1)
-    for (let i = 1; i < list.length; i++)
-      edges.push({
-        sourceId: list[0].id,
-        targetId: list[i].id,
-        type: "潜在互补",
-        reason: "等待模型判断",
-        strength: 0.4,
-      });
-  return edges;
-}
 
 function openIdea(id, tab = "analysis") {
   const idea = shownIdeas().find((item) => item.id === id);
@@ -906,114 +858,588 @@ function saveAi() {
   );
 }
 
+const OCEAN_EDGE_TYPES = {
+  相似: "#2e6b4e",
+  互补: "#1f7a72",
+  依赖: "#2b6cb0",
+  先后: "#6b46c1",
+  包含: "#975a16",
+  冲突: "#c53030",
+  资源复用: "#4a7a5c",
+};
+let oceanState = null;
+
 async function openOcean() {
   if (document.querySelector("#ocean")) return;
   const list = shownIdeas();
-  modalRoot.innerHTML = `<section class="ocean" id="ocean"><canvas></canvas><div class="ocean-grain"></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住并拖动海面探索 · 点击想法查看详情</p></div><div class="engine-state"><i></i><b>${ai.apiKey ? "AI 正在分析关系…" : "本地语义引擎模式"}</b></div><button class="close pressable" data-action="close-ocean">×</button></header><div class="ocean-world"></div><div class="drag-hint">按住海面拖动 ↔</div></section>`;
-  const ocean = document.querySelector("#ocean"),
-    world = ocean.querySelector(".ocean-world"),
-    canvas = ocean.querySelector("canvas"),
+  modalRoot.innerHTML = `<section class="ocean" id="ocean"><canvas></canvas><div class="ocean-grain"></div><div class="ocean-viewport"><svg class="ocean-svg" id="oceanSvg"></svg><div class="ocean-nodes" id="oceanNodes"></div></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住海面拖动 · 悬停想法查看关系 · 点击查看详情</p></div><div class="engine-state"><i></i><b id="oceanStatus">${ai.apiKey ? "AI 正在分析想法结构…" : "本地模式 · 按标签聚类"}</b></div><button class="panel-toggle pressable" data-action="ocean-panel">洞察</button><button class="close pressable" data-action="close-ocean">×</button></header><div class="ocean-legend" id="oceanLegend" hidden></div><aside class="ocean-panel glass" id="oceanPanel"></aside><div class="ocean-hint glass" id="oceanHint" hidden></div><div class="drag-hint">拖动海面漫游 · 右侧洞察面板可跳转聚焦</div></section>`;
+  const oceanEl = document.querySelector("#ocean");
+  const canvas = oceanEl.querySelector("canvas");
+  rememberFocus();
+  let ctx = null;
+  try {
     ctx = canvas.getContext("2d");
-  if (!modalRoot.childElementCount) lastFocusedNode = document.activeElement;
-  let points = layoutPoints(list);
-  world.innerHTML = points
-    .map((point, index) => {
-      const idea = list.find((item) => item.id === point.id);
-      return `<button class="ocean-node pressable" data-action="ocean-idea" data-id="${esc(idea.id)}" style="left:${point.x}px;top:${point.y}px;animation-delay:-${index * 1.3}s"><span>${esc(idea.tags[0] || "想法")}</span><h3>${esc(idea.title)}</h3><div><small>${esc(idea.status)}</small><b>${idea.confidence}</b></div></button>`;
-    })
-    .join("");
-  let edges = fallbackEdges(list),
-    pan = { x: 0, y: 0 },
-    drag = null,
-    pointer = { x: innerWidth / 2, y: innerHeight / 2 },
-    frame;
-  const nodes = world.querySelectorAll(".ocean-node");
-  const relayout = () => {
-    points = layoutPoints(list);
-    points.forEach((point, index) => {
-      const node = nodes[index];
-      if (node) {
-        node.style.left = `${point.x}px`;
-        node.style.top = `${point.y}px`;
-      }
-    });
+  } catch {
+    ctx = null;
+  }
+  const clusters = clusterizeByTags(list);
+  oceanState = {
+    list,
+    clusters,
+    edges: [],
+    advice: "",
+    modelDone: false,
+    pan: { x: 0, y: 0 },
+    drag: null,
+    pointer: { x: innerWidth / 2, y: innerHeight / 2 },
+    focus: null,
+    pinned: false,
+    activeType: null,
+    activeCluster: null,
+    pos: new Map(),
+    centers: [],
+    zoneR: [],
+    clusterOf: new Map(),
+    neighbors: new Map(),
+    degree: new Map(),
+    insights: { hubs: [], orphans: [], conflicts: [], mergeable: [] },
+    viewW: innerWidth,
+    viewH: innerHeight,
   };
+  rebuildOceanLayout();
+  renderOceanWorld();
+  renderOceanLegend();
+  renderOceanPanel();
   const resize = () => {
     const dpr = Math.min(devicePixelRatio, 2);
     canvas.width = innerWidth * dpr;
     canvas.height = innerHeight * dpr;
     canvas.style.width = `${innerWidth}px`;
     canvas.style.height = `${innerHeight}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    relayout();
+    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    oceanState.viewW = innerWidth;
+    oceanState.viewH = innerHeight;
+    applyOceanPan();
   };
   const down = (event) => {
     if (
       event.target.closest(".ocean-node") ||
-      event.target.closest(".ocean-toolbar")
+      event.target.closest(".ocean-toolbar") ||
+      event.target.closest(".ocean-panel") ||
+      event.target.closest(".ocean-legend") ||
+      event.target.closest(".ocean-hint")
     )
       return;
-    ocean.setPointerCapture(event.pointerId);
-    drag = { x: event.clientX, y: event.clientY, ox: pan.x, oy: pan.y };
+    oceanEl.setPointerCapture(event.pointerId);
+    oceanState.drag = {
+      x: event.clientX,
+      y: event.clientY,
+      ox: oceanState.pan.x,
+      oy: oceanState.pan.y,
+    };
   };
   const move = (event) => {
-    pointer = { x: event.clientX, y: event.clientY };
-    if (!drag) return;
-    pan = {
-      x: drag.ox + event.clientX - drag.x,
-      y: drag.oy + event.clientY - drag.y,
+    oceanState.pointer = { x: event.clientX, y: event.clientY };
+    if (!oceanState.drag) return;
+    oceanState.pan = {
+      x: oceanState.drag.ox + event.clientX - oceanState.drag.x,
+      y: oceanState.drag.oy + event.clientY - oceanState.drag.y,
     };
-    world.style.transform = `translate3d(${pan.x}px,${pan.y}px,0)`;
+    applyOceanPan();
   };
-  const up = () => (drag = null);
-  const start = performance.now();
-  const draw = (now) => {
-    drawOcean(ctx, innerWidth, innerHeight, (now - start) / 1000, pointer);
-    drawEdges(ctx, points, edges, pan, (now - start) / 1000);
-    frame = requestAnimationFrame(draw);
+  const up = () => (oceanState.drag = null);
+  const over = (event) => {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    const node = event.target.closest(".ocean-node");
+    if (node) setOceanFocus(node.dataset.id, false);
+  };
+  const out = (event) => {
+    if (event.target.closest(".ocean-node") && !oceanState.pinned)
+      setOceanFocus(null, false);
   };
   resize();
   addEventListener("resize", resize);
-  ocean.addEventListener("pointerdown", down);
-  ocean.addEventListener("pointermove", move);
-  ocean.addEventListener("pointerup", up);
-  frame = requestAnimationFrame(draw);
-  ocean.querySelector(".close")?.focus();
+  oceanEl.addEventListener("pointerdown", down);
+  oceanEl.addEventListener("pointermove", move);
+  oceanEl.addEventListener("pointerup", up);
+  oceanEl.addEventListener("pointerover", over);
+  oceanEl.addEventListener("pointerout", out);
+  let frame = 0;
+  if (ctx) {
+    const start = performance.now();
+    const draw = (now) => {
+      drawOcean(
+        ctx,
+        innerWidth,
+        innerHeight,
+        (now - start) / 1000,
+        oceanState?.pointer || { x: innerWidth / 2, y: innerHeight / 2 },
+      );
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+  }
+  oceanEl.querySelector(".close")?.focus();
   oceanCleanup = () => {
     cancelAnimationFrame(frame);
     removeEventListener("resize", resize);
   };
-  try {
-    edges = await analyzeRelations(list);
-    const status = ocean.querySelector(".engine-state");
-    if (ai.apiKey) status.classList.add("model");
-    status.querySelector("b").textContent = ai.apiKey
-      ? "真实大模型已完成关系分配"
-      : "本地语义引擎模式";
-  } catch (error) {
-    toast(error.message || "关系分析失败，已使用本地引擎");
+  if (ai.apiKey) {
+    try {
+      const result = await analyzeOceanModel(list);
+      if (!document.querySelector("#ocean")) {
+        oceanState = null;
+        return;
+      }
+      if (result.clusters.length) oceanState.clusters = result.clusters;
+      oceanState.edges = result.edges;
+      oceanState.advice = result.advice;
+      oceanState.modelDone = true;
+      rebuildOceanLayout();
+      renderOceanWorld();
+      renderOceanLegend();
+      renderOceanPanel();
+      document.querySelector("#oceanStatus").textContent = `AI 已完成分析 · ${oceanState.clusters.length} 个簇群 · ${oceanState.edges.length} 条关系`;
+    } catch (error) {
+      if (document.querySelector("#ocean")) {
+        document.querySelector("#oceanStatus").textContent =
+          "AI 分析失败 · 已降级为标签聚类";
+        toast(error.message || "关系分析失败，已使用本地聚类");
+      }
+    }
   }
 }
 function closeOcean() {
   oceanCleanup?.();
   oceanCleanup = null;
+  oceanState = null;
   modalRoot.innerHTML = "";
   restoreFocus();
 }
-function layoutPoints(list) {
-  const w = Math.max(innerWidth, 1000),
-    h = Math.max(innerHeight, 700);
-  return list.map((item, index) => {
-    const ring = Math.floor(index / 8),
-      slot = index % 8,
-      angle = (slot / Math.min(8, list.length)) * Math.PI * 2 + ring * 0.45,
-      radius = 250 + ring * 250;
-    return {
-      id: item.id,
-      x: w / 2 + Math.cos(angle) * radius,
-      y: h / 2 + Math.sin(angle) * radius,
-    };
+function clusterizeByTags(list) {
+  const groups = new Map();
+  list.forEach((item) => {
+    const key = item.tags?.[0] || "其他";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item.id);
   });
+  return [...groups.entries()].map(([label, ids]) => ({ label, ids }));
+}
+function dedupeClusters(clusters, validIds) {
+  const used = new Set();
+  const out = [];
+  clusters.forEach((cluster) => {
+    const ids = cluster.ids.filter((id) => !used.has(id));
+    ids.forEach((id) => used.add(id));
+    if (ids.length) out.push({ label: cluster.label, ids });
+  });
+  const rest = [...validIds].filter((id) => !used.has(id));
+  if (rest.length) out.push({ label: "其他", ids: rest });
+  return out;
+}
+async function analyzeOceanModel(list) {
+  const reply = await callModel(
+    [
+      {
+        role: "system",
+        content:
+          '你是想法架构师。分析想法集合的语义结构，只返回JSON：{"clusters":[{"label":"主题名(不超过6字)","ids":["id"]}],"edges":[{"sourceId":"id","targetId":"id","type":"相似|依赖|先后|包含|互补|冲突|资源复用","reason":"不超过16字","strength":0到1}],"advice":"一句话整体建议，不超过40字"}。规则：每个想法必须且只能归入一个集群；只能使用提供的id；每个想法最多3条边；没有真实语义关系就不要造边；strength表示关系强度0-1。',
+      },
+      {
+        role: "user",
+        content: JSON.stringify(
+          list.slice(0, 30).map((item) => ({
+            id: item.id,
+            title: item.title,
+            content: (item.content || "").slice(0, 80),
+            tags: item.tags,
+          })),
+        ),
+      },
+    ],
+    0.2,
+  );
+  const data = parseJson(reply);
+  const valid = new Set(list.map((item) => item.id));
+  const types = Object.keys(OCEAN_EDGE_TYPES);
+  const clusters = dedupeClusters(
+    (Array.isArray(data.clusters) ? data.clusters : [])
+      .map((cluster) => ({
+        label: String(cluster?.label || "未分组").slice(0, 8),
+        ids: (Array.isArray(cluster?.ids) ? cluster.ids : []).filter((id) =>
+          valid.has(id),
+        ),
+      }))
+      .filter((cluster) => cluster.ids.length),
+    valid,
+  );
+  const seen = new Set();
+  const edges = (Array.isArray(data.edges) ? data.edges : [])
+    .filter(
+      (edge) =>
+        valid.has(edge?.sourceId) &&
+        valid.has(edge?.targetId) &&
+        edge.sourceId !== edge.targetId &&
+        types.includes(edge?.type),
+    )
+    .map((edge) => ({
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      type: edge.type,
+      reason: String(edge?.reason || "").slice(0, 24),
+      strength: Math.max(0.1, Math.min(1, Number(edge?.strength) || 0.5)),
+    }))
+    .filter((edge) => {
+      const key = [edge.sourceId, edge.targetId].sort().join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 60);
+  return {
+    clusters: clusters.length ? clusters : clusterizeByTags(list),
+    edges,
+    advice: String(data.advice || "").slice(0, 60),
+  };
+}
+function computeInsights(list, edges) {
+  const degree = new Map(list.map((item) => [item.id, 0]));
+  edges.forEach((edge) => {
+    degree.set(edge.sourceId, (degree.get(edge.sourceId) || 0) + 1);
+    degree.set(edge.targetId, (degree.get(edge.targetId) || 0) + 1);
+  });
+  const title = (id) => list.find((item) => item.id === id)?.title || id;
+  return {
+    hubs: [...degree.entries()]
+      .filter(([, d]) => d >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id, d]) => ({ id, title: title(id), d })),
+    orphans: list
+      .filter((item) => (degree.get(item.id) || 0) === 0)
+      .map((item) => ({ id: item.id, title: item.title })),
+    conflicts: edges
+      .filter((edge) => edge.type === "冲突")
+      .map((edge) => ({
+        ...edge,
+        a: title(edge.sourceId),
+        b: title(edge.targetId),
+      })),
+    mergeable: edges
+      .filter((edge) => edge.type === "相似" && edge.strength >= 0.75)
+      .slice(0, 3)
+      .map((edge) => ({
+        ...edge,
+        a: title(edge.sourceId),
+        b: title(edge.targetId),
+      })),
+  };
+}
+function buildOceanLayout(list, clusters, edges) {
+  const clusterOf = new Map();
+  clusters.forEach((cluster, k) =>
+    cluster.ids.forEach((id) => clusterOf.set(id, k)),
+  );
+  const K = Math.max(1, clusters.length);
+  const ring = 300 + K * 95;
+  const centers = clusters.map((_, k) => {
+    const angle = (k / K) * Math.PI * 2 - Math.PI / 2;
+    return { x: Math.cos(angle) * ring, y: Math.sin(angle) * ring * 0.8 };
+  });
+  const zoneR = clusters.map(
+    (cluster) => 130 + 34 * Math.sqrt(cluster.ids.length),
+  );
+  const pos = new Map();
+  clusters.forEach((cluster, k) => {
+    const n = cluster.ids.length;
+    cluster.ids.forEach((id, i) => {
+      const angle = (i / n) * Math.PI * 2 + k * 0.7;
+      const r = n === 1 ? 0 : zoneR[k] * 0.5;
+      pos.set(id, {
+        x: centers[k].x + Math.cos(angle) * r,
+        y: centers[k].y + Math.sin(angle) * r,
+      });
+    });
+  });
+  const ids = list.map((item) => item.id);
+  for (let tick = 0; tick < 150; tick++) {
+    const alpha = 1 - tick / 150;
+    const fx = new Map(ids.map((id) => [id, 0]));
+    const fy = new Map(ids.map((id) => [id, 0]));
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = ids[i];
+        const b = ids[j];
+        if (clusterOf.get(a) !== clusterOf.get(b)) continue;
+        const pa = pos.get(a);
+        const pb = pos.get(b);
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) {
+          dx = i % 2 ? 1 : -1;
+          dy = j % 2 ? 1 : -1;
+          d2 = 1;
+        }
+        const d = Math.sqrt(d2);
+        const force = Math.min(1400 / d2, 2.2);
+        const ux = (dx / d) * force;
+        const uy = (dy / d) * force;
+        fx.set(a, fx.get(a) + ux);
+        fy.set(a, fy.get(a) + uy);
+        fx.set(b, fx.get(b) - ux);
+        fy.set(b, fy.get(b) - uy);
+      }
+    }
+    edges.forEach((edge) => {
+      if (clusterOf.get(edge.sourceId) !== clusterOf.get(edge.targetId))
+        return;
+      const pa = pos.get(edge.sourceId);
+      const pb = pos.get(edge.targetId);
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      const force = ((d - 165) / d) * 0.045;
+      const ux = dx * force;
+      const uy = dy * force;
+      fx.set(edge.sourceId, fx.get(edge.sourceId) + ux);
+      fy.set(edge.sourceId, fy.get(edge.sourceId) + uy);
+      fx.set(edge.targetId, fx.get(edge.targetId) - ux);
+      fy.set(edge.targetId, fy.get(edge.targetId) - uy);
+    });
+    ids.forEach((id) => {
+      const k = clusterOf.get(id) ?? 0;
+      const p = pos.get(id);
+      let vx = (fx.get(id) + (centers[k].x - p.x) * 0.05) * alpha;
+      let vy = (fy.get(id) + (centers[k].y - p.y) * 0.05) * alpha;
+      const vlen = Math.hypot(vx, vy);
+      if (vlen > 26) {
+        vx = (vx / vlen) * 26;
+        vy = (vy / vlen) * 26;
+      }
+      p.x += vx;
+      p.y += vy;
+      const dx = p.x - centers[k].x;
+      const dy = p.y - centers[k].y;
+      const d = Math.hypot(dx, dy);
+      const max = zoneR[k] * 0.92;
+      if (d > max) {
+        p.x = centers[k].x + (dx / d) * max;
+        p.y = centers[k].y + (dy / d) * max;
+      }
+    });
+  }
+  return { pos, centers, zoneR, clusterOf };
+}
+function rebuildOceanLayout() {
+  const st = oceanState;
+  const layout = buildOceanLayout(st.list, st.clusters, st.edges);
+  st.pos = layout.pos;
+  st.centers = layout.centers;
+  st.zoneR = layout.zoneR;
+  st.clusterOf = layout.clusterOf;
+  st.degree = new Map(st.list.map((item) => [item.id, 0]));
+  st.neighbors = new Map(st.list.map((item) => [item.id, new Set()]));
+  st.edges.forEach((edge) => {
+    st.degree.set(edge.sourceId, (st.degree.get(edge.sourceId) || 0) + 1);
+    st.degree.set(edge.targetId, (st.degree.get(edge.targetId) || 0) + 1);
+    st.neighbors.get(edge.sourceId)?.add(edge.targetId);
+    st.neighbors.get(edge.targetId)?.add(edge.sourceId);
+  });
+  st.insights = computeInsights(st.list, st.edges);
+}
+function applyOceanPan() {
+  const st = oceanState;
+  if (!st) return;
+  const layer = document.querySelector("#oceanLayer");
+  const nodes = document.querySelector("#oceanNodes");
+  if (layer)
+    layer.setAttribute(
+      "transform",
+      `translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y})`,
+    );
+  if (nodes)
+    nodes.style.transform = `translate(${st.viewW / 2 + st.pan.x}px, ${st.viewH / 2 + st.pan.y}px)`;
+}
+function renderOceanWorld() {
+  const st = oceanState;
+  if (!st) return;
+  const svg = document.querySelector("#oceanSvg");
+  const nodesBox = document.querySelector("#oceanNodes");
+  if (!svg || !nodesBox) return;
+  const showLabels = st.edges.length <= 12;
+  const zoneMarkup = st.clusters
+    .map((cluster, k) => {
+      const dim = st.activeCluster != null && st.activeCluster !== k;
+      return `<g class="ozone ${dim ? "dim" : ""}"><circle cx="${st.centers[k].x}" cy="${st.centers[k].y}" r="${st.zoneR[k]}" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.55)" stroke-dasharray="7 9"></circle><text class="zlabel" x="${st.centers[k].x}" y="${st.centers[k].y - st.zoneR[k] - 12}" text-anchor="middle">${esc(cluster.label)} · ${cluster.ids.length}</text></g>`;
+    })
+    .join("");
+  const edgeMarkup = st.edges
+    .map((edge, i) => {
+      const a = st.pos.get(edge.sourceId);
+      const b = st.pos.get(edge.targetId);
+      if (!a || !b) return "";
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      const nx = -(b.y - a.y);
+      const ny = b.x - a.x;
+      const nl = Math.hypot(nx, ny) || 1;
+      const bend = (i % 2 ? 1 : -1) * (10 + (i % 3) * 8);
+      const cx = mx + (nx / nl) * bend;
+      const cy = my + (ny / nl) * bend;
+      const color = OCEAN_EDGE_TYPES[edge.type] || "#4a7a5c";
+      const width = 1 + edge.strength * 2.4;
+      const typeDim = st.activeType && st.activeType !== edge.type;
+      const clusterDim =
+        st.activeCluster != null &&
+        (st.clusterOf.get(edge.sourceId) !== st.activeCluster ||
+          st.clusterOf.get(edge.targetId) !== st.activeCluster);
+      const dim = typeDim || clusterDim;
+      const label = showLabels && !dim;
+      return `<path class="oedge ${dim ? "dim" : ""}" data-edge="${i}" d="M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}" stroke="${color}" stroke-width="${width}" fill="none"></path>${label ? `<text class="elabel" x="${cx}" y="${cy - 4}" text-anchor="middle" fill="${color}">${esc(edge.type)}</text>` : ""}`;
+    })
+    .join("");
+  svg.innerHTML = `<g id="oceanLayer" transform="translate(${st.viewW / 2 + st.pan.x} ${st.viewH / 2 + st.pan.y})">${zoneMarkup}${edgeMarkup}</g>`;
+  nodesBox.innerHTML = st.list
+    .map((idea) => {
+      const p = st.pos.get(idea.id);
+      if (!p) return "";
+      const k = st.clusterOf.get(idea.id) ?? 0;
+      const deg = st.degree.get(idea.id) || 0;
+      const isOrphan = st.modelDone && deg === 0;
+      const dim =
+        (st.activeCluster != null && k !== st.activeCluster) ||
+        (st.activeType && !st.edges.some(
+          (edge) =>
+            edge.type === st.activeType &&
+            (edge.sourceId === idea.id || edge.targetId === idea.id),
+        ));
+      return `<button class="ocean-node pressable ${dim ? "dim" : ""} ${isOrphan ? "island" : ""}" data-action="ocean-idea" data-id="${esc(idea.id)}" style="left:${p.x}px;top:${p.y}px"><span>${esc(st.clusters[k]?.label || "想法")}</span><h3>${esc(idea.title)}</h3><div><small>${esc(idea.status)}${deg ? ` · ${deg} 条关系` : ""}</small><b>${idea.confidence}</b></div></button>`;
+    })
+    .join("");
+  applyOceanPan();
+  applyFocusClasses();
+}
+function renderOceanLegend() {
+  const st = oceanState;
+  const box = document.querySelector("#oceanLegend");
+  if (!st || !box) return;
+  const counts = {};
+  st.edges.forEach((edge) => {
+    counts[edge.type] = (counts[edge.type] || 0) + 1;
+  });
+  box.innerHTML = Object.entries(OCEAN_EDGE_TYPES)
+    .filter(([type]) => counts[type])
+    .map(
+      ([type, color]) =>
+        `<button class="legend-chip ${st.activeType === type ? "active" : ""}" data-action="ocean-type" data-type="${esc(type)}"><i style="background:${color}"></i>${esc(type)}<small>${counts[type]}</small></button>`,
+    )
+    .join("");
+  box.hidden = !st.edges.length;
+}
+function renderOceanPanel() {
+  const st = oceanState;
+  const box = document.querySelector("#oceanPanel");
+  if (!st || !box) return;
+  const { insights } = st;
+  const clustersBlock = st.clusters
+    .map(
+      (cluster, k) =>
+        `<button class="panel-row ${st.activeCluster === k ? "active" : ""}" data-action="ocean-cluster" data-cluster="${k}"><span>${esc(cluster.label)}</span><b>${cluster.ids.length}</b></button>`,
+    )
+    .join("");
+  const hubsBlock = insights.hubs
+    .map(
+      (hub) =>
+        `<button class="panel-row" data-action="ocean-focus" data-id="${esc(hub.id)}"><span>枢纽 · ${esc(hub.title)}</span><b>${hub.d}</b></button>`,
+    )
+    .join("");
+  const orphanBlock = insights.orphans
+    .map(
+      (orphan) =>
+        `<button class="panel-row island" data-action="ocean-focus" data-id="${esc(orphan.id)}"><span>孤岛 · ${esc(orphan.title)}</span><b>0</b></button>`,
+    )
+    .join("");
+  const conflictBlock = insights.conflicts
+    .map(
+      (conflict) =>
+        `<button class="panel-row conflict" data-action="ocean-focus" data-id="${esc(conflict.sourceId)}"><span>冲突 · ${esc(conflict.a)} × ${esc(conflict.b)}</span><b>${esc(conflict.reason)}</b></button>`,
+    )
+    .join("");
+  const mergeBlock = insights.mergeable
+    .map(
+      (merge) =>
+        `<button class="panel-row" data-action="ocean-focus" data-id="${esc(merge.sourceId)}"><span>可合并 · ${esc(merge.a)} ≈ ${esc(merge.b)}</span><b>${Math.round(merge.strength * 100)}%</b></button>`,
+    )
+    .join("");
+  box.innerHTML = `<div class="panel-head"><span>OCEAN INSIGHTS</span><b>${st.list.length} 个想法 · ${st.edges.length} 条关系</b>${st.advice ? `<p>${esc(st.advice)}</p>` : ""}</div><div class="panel-sec"><small>想法簇群</small>${clustersBlock}</div>${st.modelDone ? `<div class="panel-sec"><small>枢纽想法</small>${hubsBlock || '<p class="empty-tip">还没有想法形成多条连接</p>'}</div>` : ""}${st.modelDone && orphanBlock ? `<div class="panel-sec"><small>孤岛想法 · 尚未连接</small>${orphanBlock}</div>` : ""}${conflictBlock ? `<div class="panel-sec"><small>需要注意的冲突</small>${conflictBlock}</div>` : ""}${mergeBlock ? `<div class="panel-sec"><small>相似度极高 · 可考虑合并</small>${mergeBlock}</div>` : ""}${!st.modelDone ? '<div class="panel-note">本地模式：按标签聚类展示，不制造假关系。连接 AI 接口后可解锁语义关系、冲突检测与合并建议。</div>' : ""}`;
+}
+function setOceanFocus(id, pinned) {
+  const st = oceanState;
+  if (!st) return;
+  st.focus = id;
+  st.pinned = Boolean(pinned) && Boolean(id);
+  applyFocusClasses();
+}
+function applyFocusClasses() {
+  const st = oceanState;
+  if (!st) return;
+  const focus = st.focus;
+  const neighbors = focus ? st.neighbors.get(focus) : null;
+  document
+    .querySelectorAll("#oceanSvg .oedge")
+    .forEach((path) => {
+      const edge = st.edges[Number(path.dataset.edge)];
+      const on = Boolean(focus && edge && (edge.sourceId === focus || edge.targetId === focus));
+      path.classList.toggle("hot", on);
+      path.classList.toggle("fade", Boolean(focus) && !on);
+    });
+  document
+    .querySelectorAll("#oceanSvg .elabel")
+    .forEach((label) => {
+      const edge = st.edges[Number(label.dataset.edge || -1)];
+      const on = Boolean(focus && edge && (edge.sourceId === focus || edge.targetId === focus));
+      label.classList.toggle("hot", on);
+      label.classList.toggle("fade", Boolean(focus) && !on);
+    });
+  document.querySelectorAll("#oceanNodes .ocean-node").forEach((node) => {
+    const id = node.dataset.id;
+    const on = !focus || id === focus || neighbors?.has(id);
+    node.classList.toggle("dim", !on);
+  });
+  const hint = document.querySelector("#oceanHint");
+  if (!hint) return;
+  if (!focus) {
+    hint.hidden = true;
+    return;
+  }
+  const idea = st.list.find((item) => item.id === focus);
+  const rels = st.edges
+    .filter((edge) => edge.sourceId === focus || edge.targetId === focus)
+    .map((edge) => ({
+      ...edge,
+      other: st.list.find(
+        (item) => item.id === (edge.sourceId === focus ? edge.targetId : edge.sourceId),
+      )?.title || "",
+    }));
+  hint.innerHTML = `<small>${esc(idea?.title || "")} 的关系</small>${
+    rels.length
+      ? rels
+          .map(
+            (rel) =>
+              `<div class="hint-row"><i style="background:${OCEAN_EDGE_TYPES[rel.type] || "#4a7a5c"}"></i><b>${esc(rel.type)}</b><span>${esc(rel.other)}${rel.reason ? ` — ${esc(rel.reason)}` : ""}</span></div>`,
+          )
+          .join("")
+      : '<p class="empty-tip">这个想法还没有建立任何关系。</p>'
+  }`;
+  hint.hidden = false;
+}
+function centerOnOceanNode(id) {
+  const st = oceanState;
+  const p = st?.pos.get(id);
+  if (!p) return;
+  st.pan = { x: -p.x, y: -p.y };
+  applyOceanPan();
 }
 function drawOcean(ctx, w, h, t, pointer) {
   ctx.clearRect(0, 0, w, h);
@@ -1050,31 +1476,6 @@ function drawOcean(ctx, w, h, t, pointer) {
     ctx.strokeStyle = `rgba(255,255,255,${0.09 + i * 0.008})`;
     ctx.stroke();
   }
-}
-function drawEdges(ctx, points, edges, pan, t) {
-  const map = new Map(points.map((point) => [point.id, point]));
-  edges.forEach((edge, index) => {
-    const a = map.get(edge.sourceId),
-      b = map.get(edge.targetId);
-    if (!a || !b) return;
-    const ax = a.x + pan.x,
-      ay = a.y + pan.y,
-      bx = b.x + pan.x,
-      by = b.y + pan.y,
-      mx = (ax + bx) / 2 + Math.sin(t * 0.45 + index) * 18,
-      my = (ay + by) / 2 + Math.cos(t * 0.38 + index) * 18;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.quadraticCurveTo(mx, my, bx, by);
-    ctx.strokeStyle = `rgba(28,91,67,${0.22 + (edge.strength || 0.5) * 0.34})`;
-    ctx.lineWidth = 1 + (edge.strength || 0.5) * 2;
-    ctx.stroke();
-    ctx.setLineDash([2, 10]);
-    ctx.lineDashOffset = -t * 8;
-    ctx.strokeStyle = "rgba(255,255,255,.52)";
-    ctx.stroke();
-    ctx.setLineDash([]);
-  });
 }
 
 document.addEventListener("click", (event) => {
@@ -1156,6 +1557,31 @@ document.addEventListener("click", (event) => {
     closeOcean();
     openIdea(target.dataset.id);
   }
+  if (action === "ocean-type") {
+    if (!oceanState) return;
+    oceanState.activeType =
+      oceanState.activeType === target.dataset.type
+        ? null
+        : target.dataset.type;
+    renderOceanWorld();
+    renderOceanLegend();
+  }
+  if (action === "ocean-cluster") {
+    if (!oceanState) return;
+    const k = Number(target.dataset.cluster);
+    oceanState.activeCluster = oceanState.activeCluster === k ? null : k;
+    oceanState.focus = null;
+    oceanState.pinned = false;
+    renderOceanWorld();
+    renderOceanPanel();
+  }
+  if (action === "ocean-focus") {
+    if (!oceanState) return;
+    setOceanFocus(target.dataset.id, true);
+    centerOnOceanNode(target.dataset.id);
+  }
+  if (action === "ocean-panel")
+    document.querySelector("#ocean")?.classList.toggle("panel-open");
 });
 document.addEventListener("change", (event) => {
   if (event.target.matches('[data-action="status-select"]'))
