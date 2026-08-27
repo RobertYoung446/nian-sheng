@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-4（展开质疑直达聊天）");
+console.log("[念生] app.js 版本 20260827-5（最新进展站内检索）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -87,6 +87,16 @@ let toastTimer;
 let oceanCleanup = null;
 let lastFocusedNode = null;
 let chatThinking = false;
+let research = {
+  ideaId: null,
+  query: "",
+  loading: false,
+  error: null,
+  items: [],
+  activeTag: null,
+  summary: "",
+  summarizing: false,
+};
 
 const view = document.querySelector("#view");
 const modalRoot = document.querySelector("#modalRoot");
@@ -486,6 +496,17 @@ function openIdea(id, tab = "analysis") {
   selectedTab = tab;
   chatMessages = [];
   chatThinking = false;
+  if (research.ideaId !== id)
+    research = {
+      ideaId: id,
+      query: idea.title || "",
+      loading: false,
+      error: null,
+      items: [],
+      activeTag: null,
+      summary: "",
+      summarizing: false,
+    };
   renderIdeaSheet(idea);
   if (tab === "talk" && ai.apiKey && !chatThinking) generateOpener(idea);
 }
@@ -515,7 +536,7 @@ function ideaTabContent(idea) {
       : "";
     return `<div class="chat" id="chatLog">${lead}${chatMessages.map((message) => `<div class="message ${message.role}"><b>${message.role === "you" ? "你" : "✦ 思考伙伴"}</b><p>${esc(message.text)}</p></div>`).join("")}${thinking}</div><div class="chat-input"><textarea id="chatQuestion" placeholder="解释你的判断，或请它继续质疑……（Enter 发送，Shift+Enter 换行）"></textarea><button class="primary pressable" data-action="send-chat" ${chatThinking ? "disabled" : ""}>发送 ↑</button></div>`;
   }
-  return `<section class="analysis-summary"><span>LIVE RESEARCH</span><p>浏览器公开版会打开 Bing News 检索该想法的最新公开进展，结果请以原始来源为准。</p></section><div style="margin-top:16px"><button class="primary pressable" data-action="research" data-title="${esc(idea.title)}">检索最新进展 ↗</button></div>`;
+  if (selectedTab === "research") return researchTabContent(idea);
 }
 function closeModal() {
   modalRoot.innerHTML = "";
@@ -610,6 +631,258 @@ function challengeAnswer(question, idea) {
   if (/怎么|如何|下一步/.test(question))
     return `不要先做完整方案。围绕「${idea.title}」找 3 位最可能的用户，只问他们最近一次遇到问题时做了什么。`;
   return `请把“${question.slice(0, 40)}”变成可证伪的陈述：什么事实出现时，你会承认自己的判断可能错了？`;
+}
+
+const RESEARCH_PROXIES = [
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+];
+const RESEARCH_TAG_RULES = [
+  ["产品", /(产品|发布|上线|版本|更新|功能)/],
+  ["AI", /(AI|人工智能|大模型|机器学习|GPT)/i],
+  ["融资", /(融资|投资|估值|IPO|收购)/],
+  ["市场", /(市场|增长|份额|销售|营收|用户数)/],
+  ["政策", /(政策|监管|法规|政府|合规|禁令)/],
+  ["研究", /(研究|论文|报告|调查|数据|学术)/],
+  ["竞争", /(竞争|对手|超越|对比|反击)/],
+  ["争议", /(争议|批评|质疑|风险|诉讼)/],
+];
+function researchTabContent(idea) {
+  const allTags = new Map();
+  research.items.forEach((item) =>
+    item.tags.forEach((tag) => allTags.set(tag, (allTags.get(tag) || 0) + 1)),
+  );
+  const tagChips = [...allTags.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(
+      ([tag, count]) =>
+        `<button class="tag-chip ${research.activeTag === tag ? "active" : ""}" data-action="research-tag" data-tag="${esc(tag)}">${esc(tag)}<small> ${count}</small></button>`,
+    )
+    .join("");
+  const visible = research.activeTag
+    ? research.items.filter((item) => item.tags.includes(research.activeTag))
+    : research.items;
+  const checkedCount = research.items.filter((item) => item.checked).length;
+  const list = research.loading
+    ? `<div class="loading-line">正在检索「${esc(research.query)}」的相关新闻……</div>`
+    : research.error
+      ? `<div class="research-error">检索失败：${esc(research.error)}。可以直接 <a href="https://www.bing.com/news/search?q=${encodeURIComponent(research.query)}" target="_blank" rel="noopener">在 Bing 打开检索结果 ↗</a></div>`
+      : `<div class="tag-bar">${tagChips}</div>${
+          visible.length
+            ? visible
+                .map((item) => {
+                  const index = research.items.indexOf(item);
+                  return `<article class="news-item"><input type="checkbox" data-action="research-check" data-index="${index}" ${item.checked ? "checked" : ""} aria-label="选择此条新闻"><div class="news-body"><div class="news-meta"><span>${esc(item.source)}</span><span>${shortDate(item.date)}</span></div><h4 class="news-title"><a href="${esc(safeHref(item.link))}" target="_blank" rel="noopener">${esc(item.title)}</a></h4><p class="news-snippet">${esc(item.snippet.slice(0, 140))}${item.snippet.length > 140 ? "…" : ""}</p><div class="news-tags">${item.tags.map((tag) => `<button class="news-tag" data-action="research-tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("")}</div></div></article>`;
+                })
+                .join("")
+            : '<div class="loading-line">没有找到相关新闻，换个关键词试试。</div>'
+        }`;
+  const foot =
+    research.loading || research.error
+      ? ""
+      : `<div class="research-foot"><button data-action="research-all">全选</button><button data-action="research-clear">清空</button><span class="spacer"></span><button class="primary pressable" data-action="research-summary" ${research.summarizing || !checkedCount ? "disabled" : ""}>${research.summarizing ? "正在总结……" : `AI 总结选中（${checkedCount}）`}</button></div>`;
+  return `<section class="analysis-summary"><span>LIVE RESEARCH</span><p>输入关键词，在这里直接查看该想法的最新公开进展；结果自带 # 标签，点击标签可筛选，勾选后可让 AI 一键总结。</p></section><div class="research-bar"><input id="researchQuery" value="${esc(research.query)}" placeholder="检索关键词" aria-label="检索关键词"><button class="primary pressable" data-action="research-search" ${research.loading ? "disabled" : ""}>${research.loading ? "检索中…" : "检索"}</button></div>${research.summary ? `<div class="summary-box"><small>✦ AI 总结</small>${esc(research.summary)}</div>` : ""}${list}${foot}`;
+}
+async function fetchWithTimeout(url, ms = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function stripHtml(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+}
+function safeHost(link) {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    return "来源";
+  }
+}
+function safeHref(link) {
+  return /^https?:\/\//i.test(link || "") ? link : "#";
+}
+function shortDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN");
+}
+function parseRss(text) {
+  const doc = new DOMParser().parseFromString(text, "text/xml");
+  if (doc.querySelector("parsererror")) throw new Error("RSS 解析失败");
+  return [...doc.querySelectorAll("item")].map((item) => {
+    const link = item.querySelector("link")?.textContent?.trim() || "";
+    return {
+      title: stripHtml(item.querySelector("title")?.textContent || ""),
+      link,
+      snippet: stripHtml(
+        item.querySelector("description")?.textContent || "",
+      ),
+      source:
+        item.getElementsByTagName("News:Source")[0]?.textContent?.trim() ||
+        safeHost(link),
+      date: item.querySelector("pubDate")?.textContent?.trim() || "",
+    };
+  });
+}
+async function fetchNewsItems(query) {
+  const rss = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS`;
+  let lastError = new Error("网络检索失败");
+  for (const build of RESEARCH_PROXIES) {
+    try {
+      const response = await fetchWithTimeout(build(rss));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const items = parseRss(await response.text());
+      if (items.length) return items;
+      throw new Error("没有解析到结果");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  try {
+    const data = await (
+      await fetchWithTimeout(
+        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rss)}`,
+      )
+    ).json();
+    const items = (data.items || []).map((item) => ({
+      title: stripHtml(item.title || ""),
+      link: item.link || "",
+      snippet: stripHtml(item.description || item.content || ""),
+      source: item.author || "Bing 新闻",
+      date: item.pubDate || "",
+    }));
+    if (items.length) return items;
+  } catch (error) {
+    lastError = error;
+  }
+  throw lastError;
+}
+function heuristicTags(item, query) {
+  const text = `${item.title} ${item.snippet}`;
+  const tags = RESEARCH_TAG_RULES.filter(([, regex]) => regex.test(text)).map(
+    ([name]) => `#${name}`,
+  );
+  if (tags.length < 2 && query)
+    tags.push(`#${query.replace(/\s+/g, "").slice(0, 8)}`);
+  return tags.length ? tags.slice(0, 4) : ["#资讯"];
+}
+async function startResearch(idea) {
+  const input = document.querySelector("#researchQuery");
+  const query = (input?.value.trim() || research.query || idea.title || "")
+    .trim()
+    .slice(0, 60);
+  research.query = query;
+  research.loading = true;
+  research.error = null;
+  research.items = [];
+  research.activeTag = null;
+  research.summary = "";
+  renderIdeaSheet(idea);
+  try {
+    research.items = await fetchNewsItems(query);
+    research.items.forEach((item) => {
+      item.tags = heuristicTags(item, query);
+      item.checked = false;
+    });
+  } catch (error) {
+    research.error = error?.message || "检索失败";
+  }
+  research.loading = false;
+  if (sheetStillOpen()) renderIdeaSheet(idea);
+  if (research.items.length && ai.apiKey) tagItemsWithModel(idea);
+}
+async function tagItemsWithModel(idea) {
+  research.tagging = true;
+  try {
+    const reply = await callModel(
+      [
+        {
+          role: "system",
+          content:
+            '你是新闻标注器。只返回JSON：{"tags":[["#标签","#标签"],...]}。按输入顺序为每条新闻给2-3个简短中文#标签（每个不超过6字，以#开头），标签应便于归纳主题。',
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            idea: idea.title,
+            items: research.items.map((item, index) => ({
+              i: index,
+              t: item.title,
+              s: item.snippet.slice(0, 100),
+            })),
+          }),
+        },
+      ],
+      0.2,
+    );
+    const parsed = parseJson(reply);
+    const tags = Array.isArray(parsed?.tags) ? parsed.tags : [];
+    research.items.forEach((item, index) => {
+      const candidate = tags[index];
+      if (Array.isArray(candidate) && candidate.length)
+        item.tags = candidate
+          .filter((tag) => typeof tag === "string" && tag.trim())
+          .map((tag) => `#${tag.trim().replace(/^#/, "").slice(0, 12)}`)
+          .slice(0, 4);
+    });
+  } catch {
+    research.tagging = false;
+  }
+  research.tagging = false;
+  if (
+    sheetStillOpen() &&
+    selectedTab === "research" &&
+    !research.loading &&
+    !research.error
+  )
+    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+}
+async function summarizeSelected(idea) {
+  if (!ai.apiKey) {
+    toast("连接 AI 后可用模型一键总结");
+    return;
+  }
+  const picked = research.items.filter((item) => item.checked);
+  if (!picked.length) {
+    toast("先勾选要总结的新闻");
+    return;
+  }
+  research.summarizing = true;
+  renderIdeaSheet(idea);
+  try {
+    research.summary = await callModel(
+      [
+        {
+          role: "system",
+          content:
+            "你是研究助理。只基于给定的新闻条目做事实性总结，不编造未提供的信息。用中文输出三部分：①总体形势（两句话内）；②关键要点（每行一条，以·开头并注明来源）；③对该想法的启示（一句话）。",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            idea: { title: idea.title, summary: idea.summary, risk: idea.risk },
+            items: picked.map((item) => ({
+              title: item.title,
+              source: item.source,
+              date: item.date,
+              snippet: item.snippet.slice(0, 140),
+              tags: item.tags,
+            })),
+          }),
+        },
+      ],
+      0.4,
+    );
+  } catch (error) {
+    research.summary = "";
+    toast(error.message || "总结失败");
+  }
+  research.summarizing = false;
+  if (sheetStillOpen()) renderIdeaSheet(idea);
 }
 
 function showAiSettings() {
@@ -848,14 +1121,34 @@ document.addEventListener("click", (event) => {
       !chatThinking
     )
       generateOpener(idea);
+    if (
+      selectedTab === "research" &&
+      idea &&
+      !research.items.length &&
+      !research.loading &&
+      !research.error
+    )
+      startResearch(idea);
   }
   if (action === "send-chat") sendChat();
-  if (action === "research")
-    window.open(
-      `https://www.bing.com/news/search?q=${encodeURIComponent(target.dataset.title)}`,
-      "_blank",
-      "noopener",
-    );
+  if (action === "research-search") {
+    const idea = shownIdeas().find((item) => item.id === selectedId);
+    if (idea && !research.loading) startResearch(idea);
+  }
+  if (action === "research-tag") {
+    research.activeTag =
+      research.activeTag === target.dataset.tag ? null : target.dataset.tag;
+    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+  }
+  if (action === "research-all" || action === "research-clear") {
+    const checked = action === "research-all";
+    research.items.forEach((item) => (item.checked = checked));
+    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+  }
+  if (action === "research-summary") {
+    const idea = shownIdeas().find((item) => item.id === selectedId);
+    if (idea) summarizeSelected(idea);
+  }
   if (action === "save-ai") saveAi();
   if (action === "open-ocean") openOcean();
   if (action === "close-ocean") closeOcean();
@@ -870,6 +1163,10 @@ document.addEventListener("change", (event) => {
   if (event.target.id === "provider")
     document.querySelector("#model").value =
       providers[event.target.value].model;
+  if (event.target.matches('[data-action="research-check"]')) {
+    const item = research.items[Number(event.target.dataset.index)];
+    if (item) item.checked = event.target.checked;
+  }
 });
 document.addEventListener("keydown", (event) => {
   if (event.target?.id === "chatQuestion" && event.key === "Enter") {
