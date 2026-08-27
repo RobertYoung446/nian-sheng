@@ -1,6 +1,7 @@
 const STORAGE_KEY = "niansheng-public-v1";
 const STORAGE_BACKUP = "niansheng-public-backup-v1";
-console.log("[念生] app.js 版本 20260827-9（数据备份与恢复）");
+const AI_STORAGE_KEY = "niansheng-ai-config-v1";
+console.log("[念生] app.js 版本 20260827-10（可选记住密钥）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -84,11 +85,21 @@ let filter = "全部";
 let selectedId = null;
 let selectedTab = "analysis";
 let chatMessages = [];
-let ai = {
-  provider: "openrouter",
-  model: providers.openrouter.model,
-  apiKey: "",
-};
+let ai = { provider: "openrouter", model: providers.openrouter.model, apiKey: "" };
+try {
+  const savedAi = JSON.parse(localStorage.getItem(AI_STORAGE_KEY) || "null");
+  if (savedAi && typeof savedAi === "object" && typeof savedAi.apiKey === "string" && savedAi.apiKey) {
+    const provider = providers[savedAi.provider] ? savedAi.provider : "openrouter";
+    ai = {
+      provider,
+      model:
+        typeof savedAi.model === "string" && savedAi.model.trim()
+          ? savedAi.model.trim()
+          : providers[provider].model,
+      apiKey: savedAi.apiKey,
+    };
+  }
+} catch {}
 let research = {
   ideaId: null,
   query: "",
@@ -990,7 +1001,11 @@ async function summarizeSelected(idea) {
 
 function showAiSettings() {
   rememberFocus();
-  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>REAL MODEL CONNECTION</span><h2>连接真实大模型</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>GitHub Pages 没有服务器。密钥只保留在当前页面内存，并由浏览器直接发给所选模型服务；刷新或关闭页面后立即消失。推荐使用支持浏览器请求的 OpenRouter。</p><label>服务商<select id="provider"><option value="openrouter" ${ai.provider === "openrouter" ? "selected" : ""}>OpenRouter（推荐）</option><option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI</option><option value="deepseek" ${ai.provider === "deepseek" ? "selected" : ""}>DeepSeek</option></select></label><label>模型名称<input id="model" value="${esc(ai.model)}"></label><label>API Key<input id="apiKey" type="password" autocomplete="off" value="${esc(ai.apiKey)}" placeholder="仅保留到页面关闭"></label><div class="security">公开静态版不会保存或上传密钥到本站；请求会直接发送至你选择的官方模型地址。请使用可撤销、有限额的个人密钥。</div><footer><button data-action="close-modal">取消</button><button class="primary pressable" data-action="save-ai">保存连接</button></footer></section></div>`;
+  let remembered = false;
+  try {
+    remembered = Boolean(localStorage.getItem(AI_STORAGE_KEY));
+  } catch {}
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>REAL MODEL CONNECTION</span><h2>连接真实大模型</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>GitHub Pages 没有服务器。默认密钥只保留在当前页面内存，刷新后即消失；勾选「记住密钥」后会保存在本浏览器中，下次打开自动连接。请勿在公用设备上勾选。推荐使用支持浏览器请求的 OpenRouter。</p><label>服务商<select id="provider"><option value="openrouter" ${ai.provider === "openrouter" ? "selected" : ""}>OpenRouter（推荐）</option><option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI</option><option value="deepseek" ${ai.provider === "deepseek" ? "selected" : ""}>DeepSeek</option></select></label><label>模型名称<input id="model" value="${esc(ai.model)}"></label><label>API Key<input id="apiKey" type="password" autocomplete="off" value="${esc(ai.apiKey)}" placeholder="仅保留到页面关闭"></label><label class="remember-row"><input type="checkbox" id="rememberKey" ${remembered ? "checked" : ""}>记住密钥（保存在本浏览器，刷新/关闭后仍有效）</label><div class="security">密钥由浏览器直接发送至所选模型服务，本站服务器不经手；勾选记住后仅写入本浏览器本地存储。请使用可撤销、有限额的个人密钥。</div><footer><button data-action="close-modal">取消</button><button class="primary pressable" data-action="save-ai">保存连接</button></footer></section></div>`;
   modalRoot.querySelector(".close")?.focus();
 }
 function saveAi() {
@@ -1002,10 +1017,29 @@ function saveAi() {
       providers[provider].model,
     apiKey: document.querySelector("#apiKey").value.trim(),
   };
+  const remember = document.querySelector("#rememberKey")?.checked;
+  try {
+    if (remember && ai.apiKey) {
+      localStorage.setItem(
+        AI_STORAGE_KEY,
+        JSON.stringify({
+          provider: ai.provider,
+          model: ai.model,
+          apiKey: ai.apiKey,
+        }),
+      );
+    } else {
+      localStorage.removeItem(AI_STORAGE_KEY);
+    }
+  } catch {}
   closeModal();
   updateChrome();
   toast(
-    ai.apiKey ? "真实大模型已连接；密钥不会持久化" : "已切换为本地分析引擎",
+    remember && ai.apiKey
+      ? "已连接，密钥已记住（仅本浏览器）"
+      : ai.apiKey
+        ? "真实大模型已连接；密钥不会持久化"
+        : "已切换为本地分析引擎",
   );
 }
 

@@ -1272,6 +1272,19 @@ a:focus-visible {
   font-size: 10px;
   line-height: 1.55;
 }
+.remember-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 9px;
+  font-weight: 500 !important;
+  color: #4f6d5e;
+  cursor: pointer;
+}
+.remember-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #286b4b;
+}
 .settings footer {
   display: flex;
   justify-content: flex-end;
