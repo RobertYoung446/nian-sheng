@@ -1,4 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
+console.log("[念生] app.js 版本 20260827-2（弹窗按钮修复版）");
 const sampleIdeas = [
   {
     id: "sample-1",
