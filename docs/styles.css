@@ -1629,3 +1629,17 @@ a:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+.sheet > header p,
+.focus-main > p,
+.ai-note p,
+.idea-card > p,
+.idea-row p,
+.analysis-summary p,
+.risk-box p,
+.action-box h3,
+.next-action p,
+.message p,
+.ocean-node h3 {
+  white-space: pre-line;
+}
