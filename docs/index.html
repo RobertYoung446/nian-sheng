@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#dfeee7" />
+    <meta name="description" content="记录、分析、关联并实现值得做的想法。" />
+    <meta property="og:title" content="念生｜让值得实现的想法，真正发生" />
+    <meta
+      property="og:description"
+      content="从灵感捕获到验证、行动与复盘的完整工作流。"
+    />
+    <meta
+      property="og:image"
+      content="https://robertyoung446.github.io/nian-sheng/og.png"
+    />
+    <title>念生｜让值得实现的想法，真正发生</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+    <main class="app-shell">
+      <aside class="sidebar glass">
+        <button
+          class="brand pressable"
+          data-view="today"
+          aria-label="返回今日工作台"
+        >
+          <span class="brand-mark" aria-hidden="true"
+            ><i></i><i></i><i></i
+          ></span>
+          <span>念生<small>IDEAS INTO LIFE</small></span>
+        </button>
+        <nav aria-label="主导航">
+          <button class="nav-item active pressable" data-view="today">
+            <span>⌂</span>今日工作台
+          </button>
+          <button class="nav-item pressable" data-view="inbox">
+            <span>⌁</span>灵感收件箱 <b id="inboxCount">0</b>
+          </button>
+          <button class="nav-item pressable" data-view="ideas">
+            <span>◫</span>想法库
+          </button>
+          <button class="nav-item pressable" data-view="network">
+            <span>⌘</span>关系图谱
+          </button>
+          <button class="nav-item pressable" data-view="projects">
+            <span>✓</span>行动项目
+          </button>
+          <button class="nav-item pressable" data-view="review">
+            <span>↗</span>复盘中心
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="streak">
+            <small>本周推进</small
+            ><strong id="weekCount">0 <span>个想法</span></strong>
+            <div id="streakBars"></div>
+          </div>
+          <div class="local-note">
+            <i></i><span>公开独立版<small>数据仅保存在此浏览器</small></span>
+          </div>
+        </div>
+      </aside>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p id="dateLine"></p>
+            <h1 id="pageTitle"></h1>
+          </div>
+          <div class="top-actions">
+            <button class="ai-connect pressable" id="aiButton">
+              <i></i><span>AI 接口</span>
+            </button>
+            <button
+              class="capture-button pressable"
+              data-action="focus-capture"
+            >
+              ＋ 记录想法
+            </button>
+          </div>
+        </header>
+        <div id="view" class="view-root" aria-live="polite"></div>
+      </section>
+    </main>
+    <div id="modalRoot"></div>
+    <div id="toast" role="status"></div>
+  </body>
+</html>
