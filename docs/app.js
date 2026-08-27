@@ -496,7 +496,7 @@ function renderIdeaSheet(idea) {
   if (!idea) return;
   const fresh = !modalRoot.childElementCount;
   if (fresh) lastFocusedNode = document.activeElement;
-  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass" onclick="event.stopPropagation()"><header><div><span>${esc(idea.status)}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button></div><div class="sheet-body">${ideaTabContent(idea)}</div></section></div>`;
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass"><header><div><span>${esc(idea.status)}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button></div><div class="sheet-body">${ideaTabContent(idea)}</div></section></div>`;
   if (fresh) modalRoot.querySelector(".close")?.focus();
 }
 function ideaTabContent(idea) {
@@ -549,7 +549,7 @@ function challengeAnswer(question, idea) {
 
 function showAiSettings() {
   rememberFocus();
-  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass" onclick="event.stopPropagation()"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>REAL MODEL CONNECTION</span><h2>连接真实大模型</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>GitHub Pages 没有服务器。密钥只保留在当前页面内存，并由浏览器直接发给所选模型服务；刷新或关闭页面后立即消失。推荐使用支持浏览器请求的 OpenRouter。</p><label>服务商<select id="provider"><option value="openrouter" ${ai.provider === "openrouter" ? "selected" : ""}>OpenRouter（推荐）</option><option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI</option><option value="deepseek" ${ai.provider === "deepseek" ? "selected" : ""}>DeepSeek</option></select></label><label>模型名称<input id="model" value="${esc(ai.model)}"></label><label>API Key<input id="apiKey" type="password" autocomplete="off" value="${esc(ai.apiKey)}" placeholder="仅保留到页面关闭"></label><div class="security">公开静态版不会保存或上传密钥到本站；请求会直接发送至你选择的官方模型地址。请使用可撤销、有限额的个人密钥。</div><footer><button data-action="close-modal">取消</button><button class="primary pressable" data-action="save-ai">保存连接</button></footer></section></div>`;
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>REAL MODEL CONNECTION</span><h2>连接真实大模型</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>GitHub Pages 没有服务器。密钥只保留在当前页面内存，并由浏览器直接发给所选模型服务；刷新或关闭页面后立即消失。推荐使用支持浏览器请求的 OpenRouter。</p><label>服务商<select id="provider"><option value="openrouter" ${ai.provider === "openrouter" ? "selected" : ""}>OpenRouter（推荐）</option><option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI</option><option value="deepseek" ${ai.provider === "deepseek" ? "selected" : ""}>DeepSeek</option></select></label><label>模型名称<input id="model" value="${esc(ai.model)}"></label><label>API Key<input id="apiKey" type="password" autocomplete="off" value="${esc(ai.apiKey)}" placeholder="仅保留到页面关闭"></label><div class="security">公开静态版不会保存或上传密钥到本站；请求会直接发送至你选择的官方模型地址。请使用可撤销、有限额的个人密钥。</div><footer><button data-action="close-modal">取消</button><button class="primary pressable" data-action="save-ai">保存连接</button></footer></section></div>`;
   modalRoot.querySelector(".close")?.focus();
 }
 function saveAi() {
@@ -753,7 +753,11 @@ document.addEventListener("click", (event) => {
   }
   if (action === "save-idea") saveDraft();
   if (action === "open-idea") openIdea(target.dataset.id);
-  if (action === "close-modal") closeModal();
+  if (action === "close-modal") {
+    const bubbledFromContent =
+      target.classList.contains("scrim") && event.target !== target;
+    if (!bubbledFromContent) closeModal();
+  }
   if (action === "filter") {
     filter = target.dataset.filter;
     renderLibrary();
