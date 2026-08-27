@@ -1643,3 +1643,11 @@ a:focus-visible {
 .ocean-node h3 {
   white-space: pre-line;
 }
+.message.thinking p {
+  animation: thinkPulse 1.4s ease-in-out infinite;
+}
+@keyframes thinkPulse {
+  50% {
+    opacity: 0.45;
+  }
+}

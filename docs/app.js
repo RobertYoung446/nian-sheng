@@ -1,5 +1,5 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-2（弹窗按钮修复版）");
+console.log("[念生] app.js 版本 20260827-3（讨论区模型直连版）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -86,6 +86,7 @@ let ai = {
 let toastTimer;
 let oceanCleanup = null;
 let lastFocusedNode = null;
+let chatThinking = false;
 
 const view = document.querySelector("#view");
 const modalRoot = document.querySelector("#modalRoot");
@@ -484,6 +485,7 @@ function openIdea(id) {
   selectedId = id;
   selectedTab = "analysis";
   chatMessages = [];
+  chatThinking = false;
   renderIdeaSheet(idea);
 }
 function rememberFocus() {
@@ -503,8 +505,15 @@ function renderIdeaSheet(idea) {
 function ideaTabContent(idea) {
   if (selectedTab === "analysis")
     return `<section class="analysis-summary"><span>✦ 分析结论</span><p>${esc(idea.summary)}</p></section><div class="score-grid">${metric("可实现性", idea.feasibility)}${metric("潜在价值", idea.impact)}${metric("表达清晰", idea.clarity)}${metric("综合信心", idea.confidence)}</div><section class="risk-box"><small>关键风险 / 待验证假设</small><p>${esc(idea.risk)}</p></section><section class="action-box"><small>推荐的下一步最小行动</small><h3>${esc(idea.nextAction)}</h3><div class="action-actions">${["计划中", "行动中", "已完成", "已搁置"].map((status) => `<button data-action="status" data-id="${esc(idea.id)}" data-status="${status}">${status}</button>`).join("")}</div></section>`;
-  if (selectedTab === "talk")
-    return `<div class="chat"><div class="message"><b>✦ 思考伙伴</b><p>我先挑战一点：${esc(idea.risk)} 你拥有的证据是什么，而不只是直觉？</p></div>${chatMessages.map((message) => `<div class="message ${message.role}"><b>${message.role === "you" ? "你" : "✦ 思考伙伴"}</b><p>${esc(message.text)}</p></div>`).join("")}</div><div class="chat-input"><textarea id="chatQuestion" placeholder="解释你的判断，或请它继续质疑……"></textarea><button class="primary pressable" data-action="send-chat">发送 ↑</button></div>`;
+  if (selectedTab === "talk") {
+    const lead = ai.apiKey
+      ? ""
+      : `<div class="message"><b>✦ 思考伙伴</b><p>我先挑战一点：${esc(idea.risk)} 你拥有的证据是什么，而不只是直觉？</p></div>`;
+    const thinking = chatThinking
+      ? `<div class="message thinking"><b>✦ 思考伙伴</b><p>正在结合你的想法组织质疑……</p></div>`
+      : "";
+    return `<div class="chat" id="chatLog">${lead}${chatMessages.map((message) => `<div class="message ${message.role}"><b>${message.role === "you" ? "你" : "✦ 思考伙伴"}</b><p>${esc(message.text)}</p></div>`).join("")}${thinking}</div><div class="chat-input"><textarea id="chatQuestion" placeholder="解释你的判断，或请它继续质疑……（Enter 发送，Shift+Enter 换行）"></textarea><button class="primary pressable" data-action="send-chat" ${chatThinking ? "disabled" : ""}>发送 ↑</button></div>`;
+  }
   return `<section class="analysis-summary"><span>LIVE RESEARCH</span><p>浏览器公开版会打开 Bing News 检索该想法的最新公开进展，结果请以原始来源为准。</p></section><div style="margin-top:16px"><button class="primary pressable" data-action="research" data-title="${esc(idea.title)}">检索最新进展 ↗</button></div>`;
 }
 function closeModal() {
@@ -512,35 +521,89 @@ function closeModal() {
   selectedId = null;
   restoreFocus();
 }
-async function sendChat() {
-  const input = document.querySelector("#chatQuestion"),
-    question = input?.value.trim();
-  if (!question) return;
-  const idea = shownIdeas().find((item) => item.id === selectedId);
-  chatMessages.push({ role: "you", text: question });
+function sheetStillOpen() {
+  return Boolean(modalRoot.querySelector(".sheet"));
+}
+function scrollChatToBottom() {
+  const log = document.querySelector("#chatLog");
+  const sheet = modalRoot.querySelector(".sheet");
+  if (log) log.scrollTop = log.scrollHeight;
+  if (sheet) sheet.scrollTop = sheet.scrollHeight;
+}
+function chatSystemPrompt(idea) {
+  return [
+    "你是严格、犀利但建设性的思想伙伴，任务是帮用户压力测试他们的想法。",
+    "要求：",
+    "1. 针对用户的具体表述回应，可以引用他们之前的原话进行追问，禁止重复已经用过的问法；",
+    "2. 每次只聚焦一个最要害的问题，追问证据、事实和数字，而不是泛泛的方法论；",
+    "3. 主动指出隐含假设、可能的反例，并给出最低成本的验证路径；",
+    "4. 用中文，简洁直接，单次回复不超过150字；不迎合，不空洞鼓励。",
+    `当前想法背景——标题：${idea.title}；描述：${idea.content}；摘要：${idea.summary}；关键风险：${idea.risk}；状态：${idea.status}。`,
+  ].join("\n");
+}
+function chatMessagesPayload(idea) {
+  return [
+    { role: "system", content: chatSystemPrompt(idea) },
+    ...chatMessages.map((message) => ({
+      role: message.role === "you" ? "user" : "assistant",
+      content: message.text,
+    })),
+  ];
+}
+async function generateOpener(idea) {
+  chatThinking = true;
   renderIdeaSheet(idea);
   try {
-    const reply = ai.apiKey
-      ? await callModel(
-          [
-            {
-              role: "system",
-              content:
-                "你是严格但建设性的思想伙伴。寻找隐含假设、反例和最低成本验证。用中文简洁回答，不迎合。",
-            },
-            {
-              role: "user",
-              content: `想法：${idea.title}\n描述：${idea.content}\n问题：${question}`,
-            },
-          ],
-          0.65,
-        )
-      : challengeAnswer(question, idea);
+    const reply = await callModel(
+      chatMessagesPayload(
+        idea,
+      ).concat([
+        {
+          role: "user",
+          content:
+            "请发起你的第一条质疑：针对这个想法最要害的假设，提出一个我必须正面回答的问题。",
+        },
+      ]),
+      0.7,
+    );
     chatMessages.push({ role: "ai", text: reply });
   } catch (error) {
     chatMessages.push({ role: "ai", text: `模型连接失败：${error.message}` });
   }
+  chatThinking = false;
+  if (sheetStillOpen()) {
+    renderIdeaSheet(idea);
+    scrollChatToBottom();
+  }
+}
+async function sendChat() {
+  if (chatThinking) return;
+  const input = document.querySelector("#chatQuestion"),
+    question = input?.value.trim();
+  if (!question) return;
+  const idea = shownIdeas().find((item) => item.id === selectedId);
+  if (!idea) return;
+  chatMessages.push({ role: "you", text: question });
+  if (!ai.apiKey) {
+    chatMessages.push({ role: "ai", text: challengeAnswer(question, idea) });
+    renderIdeaSheet(idea);
+    scrollChatToBottom();
+    return;
+  }
+  chatThinking = true;
   renderIdeaSheet(idea);
+  scrollChatToBottom();
+  try {
+    const reply = await callModel(chatMessagesPayload(idea), 0.65);
+    chatMessages.push({ role: "ai", text: reply });
+  } catch (error) {
+    chatMessages.push({ role: "ai", text: `模型连接失败：${error.message}` });
+  }
+  chatThinking = false;
+  if (sheetStillOpen()) {
+    renderIdeaSheet(idea);
+    scrollChatToBottom();
+  }
 }
 function challengeAnswer(question, idea) {
   if (/怎么|如何|下一步/.test(question))
@@ -770,7 +833,16 @@ document.addEventListener("click", (event) => {
   }
   if (action === "idea-tab") {
     selectedTab = target.dataset.tab;
-    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+    const idea = shownIdeas().find((item) => item.id === selectedId);
+    renderIdeaSheet(idea);
+    if (
+      selectedTab === "talk" &&
+      idea &&
+      ai.apiKey &&
+      !chatMessages.length &&
+      !chatThinking
+    )
+      generateOpener(idea);
   }
   if (action === "send-chat") sendChat();
   if (action === "research")
@@ -795,6 +867,13 @@ document.addEventListener("change", (event) => {
       providers[event.target.value].model;
 });
 document.addEventListener("keydown", (event) => {
+  if (event.target?.id === "chatQuestion" && event.key === "Enter") {
+    if (!event.shiftKey) {
+      event.preventDefault();
+      sendChat();
+    }
+    return;
+  }
   if (event.key !== "Escape") return;
   if (document.querySelector("#ocean")) {
     closeOcean();
