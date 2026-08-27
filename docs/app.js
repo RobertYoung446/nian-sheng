@@ -1,5 +1,6 @@
 const STORAGE_KEY = "niansheng-public-v1";
-console.log("[念生] app.js 版本 20260827-8（双击删除 / 完成烟花 / 署名）");
+const STORAGE_BACKUP = "niansheng-public-backup-v1";
+console.log("[念生] app.js 版本 20260827-9（数据备份与恢复）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -72,6 +73,11 @@ const providers = {
     model: "deepseek-chat",
   },
 };
+let toastTimer;
+let oceanCleanup = null;
+let lastFocusedNode = null;
+let chatThinking = false;
+let cardClickTimer = null;
 let ideas = loadIdeas();
 let currentView = "today";
 let filter = "全部";
@@ -83,11 +89,6 @@ let ai = {
   model: providers.openrouter.model,
   apiKey: "",
 };
-let toastTimer;
-let oceanCleanup = null;
-let lastFocusedNode = null;
-let chatThinking = false;
-let cardClickTimer = null;
 let research = {
   ideaId: null,
   query: "",
@@ -121,15 +122,30 @@ function normalizeIdea(item) {
 }
 function loadIdeas() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeIdea).filter(Boolean);
-  } catch {
-    return [];
-  }
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(normalizeIdea).filter(Boolean);
+    }
+  } catch {}
+  try {
+    const rawBackup = localStorage.getItem(STORAGE_BACKUP);
+    if (rawBackup) {
+      const backup = JSON.parse(rawBackup);
+      if (Array.isArray(backup) && backup.length) {
+        toast("检测到主数据异常，已从本地备份恢复");
+        return backup.map(normalizeIdea).filter(Boolean);
+      }
+    }
+  } catch {}
+  return [];
 }
 function saveIdeas() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ideas));
+  const json = JSON.stringify(ideas);
+  localStorage.setItem(STORAGE_KEY, json);
+  try {
+    localStorage.setItem(STORAGE_BACKUP, json);
+  } catch {}
   updateChrome();
 }
 function shownIdeas() {
@@ -211,7 +227,7 @@ function renderToday() {
       list.find((item) =>
         ["行动中", "待验证", "计划中"].includes(item.status),
       ) || list[0];
-  view.innerHTML = `<div class="welcome"><span>✦</span><p>${ideas.length ? `你已经留下 ${ideas.length} 个真实想法。今天选择一个最小动作就好。` : "这是无需登录的公开独立版。先记录一个最近反复出现的念头。"}</p></div><section class="capture-card"><div class="capture-head"><span>✦</span><div><h2>捕捉刚刚闪过的念头</h2><p>不用整理，先把它留下来</p></div></div><textarea id="ideaDraft" placeholder="我刚想到……" aria-label="记录新想法"></textarea><div class="capture-footer"><span>数据保存在当前浏览器；连接模型后会自动深入分析</span><button class="primary pressable" data-action="save-idea">收进灵感箱</button></div></section><div class="section-heading"><div><h2>此刻最值得推进</h2><p>根据可行性、影响力与状态整理</p></div><button data-action="open-idea" data-id="${esc(focus.id)}">查看完整分析 →</button></div><section class="focus-card"><div class="focus-main"><div class="eyebrow"><span>本周焦点</span><small>${esc(focus.status)}</small></div><h2>${esc(focus.title)}</h2><p>${esc(focus.summary)}</p>${metric("想法成熟度", focus.confidence)}<div class="next-action"><span>下一步最小行动</span><p>${esc(focus.nextAction)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}">开始行动 →</button></div></div><aside class="ai-note"><span>✦</span><small>思考伙伴的提醒</small><h3>别急着证明它是对的</h3><p>${esc(focus.risk)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}" data-tab="talk">展开质疑</button></aside></section><div class="section-heading"><div><h2>最近的想法</h2><p>${list.length} 个方向正在等待选择</p></div></div><section class="idea-grid">${list.slice(0, 3).map(ideaCard).join("")}</section>`;
+  view.innerHTML = `<div class="welcome"><span>✦</span><p>${ideas.length ? `你已经留下 ${ideas.length} 个真实想法。今天选择一个最小动作就好。` : "这是无需登录的公开独立版。先记录一个最近反复出现的念头。"}</p></div><section class="capture-card"><div class="capture-head"><span>✦</span><div><h2>捕捉刚刚闪过的念头</h2><p>不用整理，先把它留下来</p></div></div><textarea id="ideaDraft" placeholder="我刚想到……" aria-label="记录新想法"></textarea><div class="capture-footer"><span>数据保存在当前浏览器 · <button class="data-entry" data-action="open-data">备份 / 导入</button></span><button class="primary pressable" data-action="save-idea">收进灵感箱</button></div></section><div class="section-heading"><div><h2>此刻最值得推进</h2><p>根据可行性、影响力与状态整理</p></div><button data-action="open-idea" data-id="${esc(focus.id)}">查看完整分析 →</button></div><section class="focus-card"><div class="focus-main"><div class="eyebrow"><span>本周焦点</span><small>${esc(focus.status)}</small></div><h2>${esc(focus.title)}</h2><p>${esc(focus.summary)}</p>${metric("想法成熟度", focus.confidence)}<div class="next-action"><span>下一步最小行动</span><p>${esc(focus.nextAction)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}">开始行动 →</button></div></div><aside class="ai-note"><span>✦</span><small>思考伙伴的提醒</small><h3>别急着证明它是对的</h3><p>${esc(focus.risk)}</p><button class="pressable" data-action="open-idea" data-id="${esc(focus.id)}" data-tab="talk">展开质疑</button></aside></section><div class="section-heading"><div><h2>最近的想法</h2><p>${list.length} 个方向正在等待选择</p></div></div><section class="idea-grid">${list.slice(0, 3).map(ideaCard).join("")}</section>`;
 }
 function renderInbox() {
   const list = shownIdeas();
@@ -500,6 +516,63 @@ function confirmDelete(idea) {
   rememberFocus();
   modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>DELETE IDEA</span><h2>删除这个想法？</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>${esc(idea.title)}</p><p>删除后无法恢复。如果只是暂时不做，建议改为「已搁置」。</p><footer><button data-action="close-modal">取消</button><button class="primary danger pressable" data-action="delete-idea" data-id="${esc(idea.id)}">确认删除</button></footer></section></div>`;
   modalRoot.querySelector(".close")?.focus();
+}
+function showDataModal() {
+  rememberFocus();
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="settings glass"><header><div class="mini-logo"><i></i><i></i><i></i></div><div><span>DATA & BACKUP</span><h2>数据管理</h2></div><button class="close pressable" data-action="close-modal">×</button></header><p>数据只保存在当前设备浏览器里：无痕模式、微信等 App 内置浏览器、或清理浏览器数据都可能导致丢失。建议定期导出备份文件，换设备时导入即可迁移。</p><p>当前已保存 <b>${ideas.length}</b> 个想法。</p><label>导入备份（.json 文件）<input type="file" id="importFile" accept=".json,application/json"></label><footer><button data-action="export-data">导出备份文件</button><button class="primary pressable" data-action="close-modal">完成</button></footer></section></div>`;
+  modalRoot.querySelector(".close")?.focus();
+  modalRoot.querySelector("#importFile")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) importData(file);
+  });
+}
+function exportData() {
+  if (!ideas.length) {
+    toast("还没有想法可以导出，先记录一条吧");
+    return;
+  }
+  try {
+    const blob = new Blob([JSON.stringify(ideas, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `niansheng-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`已导出 ${ideas.length} 个想法的备份文件`);
+  } catch {
+    toast("导出失败：请使用主流浏览器的最新版本");
+  }
+}
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!Array.isArray(parsed)) throw new Error("格式不正确");
+      const existing = new Set(ideas.map((item) => item.id));
+      const incoming = parsed
+        .map(normalizeIdea)
+        .filter(Boolean)
+        .filter((item) => !existing.has(item.id));
+      if (!incoming.length) {
+        toast("备份里没有需要导入的新想法");
+        return;
+      }
+      ideas = [...incoming, ...ideas];
+      saveIdeas();
+      closeModal();
+      render(currentView);
+      toast(`已导入 ${incoming.length} 个想法`);
+    } catch {
+      toast("导入失败：请选择本站导出的 .json 备份文件");
+    }
+  };
+  reader.readAsText(file);
 }
 function celebrate() {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
@@ -1667,6 +1740,8 @@ document.addEventListener("click", (event) => {
       toast(`已删除「${removed.title.slice(0, 14)}」`);
     }
   }
+  if (action === "open-data") showDataModal();
+  if (action === "export-data") exportData();
   if (action === "save-ai") saveAi();
   if (action === "open-ocean") openOcean();
   if (action === "close-ocean") closeOcean();

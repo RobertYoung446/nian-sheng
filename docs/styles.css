@@ -284,6 +284,21 @@ a:focus-visible {
   padding: 10px;
   color: #486052;
   font-size: 12px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.data-entry {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #4a7a63;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted rgba(74, 122, 99, 0.55);
+  text-underline-offset: 3px;
 }
 .local-note > i {
   width: 33px;
