@@ -1,7 +1,7 @@
 const STORAGE_KEY = "niansheng-public-v1";
 const STORAGE_BACKUP = "niansheng-public-backup-v1";
 const AI_STORAGE_KEY = "niansheng-ai-config-v1";
-console.log("[念生] app.js 版本 20260827-12（想法编辑与演变历程）");
+console.log("[念生] app.js 版本 20260827-13（证据制评分体系）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -123,7 +123,23 @@ document.querySelector("#dateLine").textContent = new Intl.DateTimeFormat(
 
 function normalizeIdea(item) {
   if (!item || typeof item !== "object") return null;
-  const merged = { ...item, ...sanitizeAnalysis(item) };
+  const merged = { ...item };
+  if (item.criteria && typeof item.criteria === "object") {
+    Object.assign(merged, sanitizeAnalysis(item));
+  } else {
+    merged.feasibility = Number(item.feasibility) || 0;
+    merged.impact = Number(item.impact) || 0;
+    merged.clarity = Number(item.clarity) || 0;
+    merged.confidence = Number(item.confidence) || 0;
+    merged.summary = typeof item.summary === "string" ? item.summary : "";
+    merged.risk = typeof item.risk === "string" ? item.risk : "";
+    merged.nextAction =
+      typeof item.nextAction === "string" ? item.nextAction : "";
+    merged.tags =
+      Array.isArray(item.tags) && item.tags.length
+        ? item.tags.filter((tag) => typeof tag === "string")
+        : ["想法"];
+  }
   merged.id =
     typeof item.id === "string" && item.id ? item.id : crypto.randomUUID();
   merged.status =
@@ -177,6 +193,123 @@ function esc(value = "") {
 function ago(time) {
   const days = Math.max(0, Math.floor((Date.now() - time) / 86400000));
   return days ? `${days} 天前` : "今天";
+}
+const RUBRIC = {
+  feasibility: {
+    label: "可实现性",
+    items: [
+      { key: "f1", label: "技术现成" },
+      { key: "f2", label: "一人可做" },
+      { key: "f3", label: "依赖可控" },
+    ],
+  },
+  impact: {
+    label: "潜在价值",
+    items: [
+      { key: "m1", label: "人群明确" },
+      { key: "m2", label: "痛点高频" },
+      { key: "m3", label: "付费/传播" },
+    ],
+  },
+  clarity: {
+    label: "表达清晰",
+    items: [
+      { key: "c1", label: "给谁用" },
+      { key: "c2", label: "解决什么" },
+      { key: "c3", label: "成果形态" },
+    ],
+  },
+};
+const LEVEL_VALUE = { yes: 100, part: 50, no: 0 };
+const RUBRIC_TIPS = {
+  f1: "补充一句技术方案来源（现成工具、开源方案还是自研）",
+  f2: "说明一个人做最小版本大概需要多少时间和投入",
+  f3: "列出最关键的依赖（资金、渠道、数据），评估是否可控",
+  m1: "明确写出目标人群是谁，越具体越好",
+  m2: "说明这个问题出现的频率和典型场景",
+  m3: "想一想用户为什么愿意为它付费或推荐给朋友",
+  c1: "第一句话就说清这个想法是给谁用的",
+  c2: "说清它解决的具体问题，而不是泛泛的方向",
+  c3: "描述做出后长什么样、怎么算成功",
+};
+const GRADE_BANDS = {
+  feasibility: [
+    [80, "可推进"],
+    [60, "需验证"],
+    [40, "有硬伤"],
+    [0, "纸上谈兵"],
+  ],
+  impact: [
+    [80, "值得投入"],
+    [60, "有潜力"],
+    [40, "偏窄"],
+    [0, "存疑"],
+  ],
+  clarity: [
+    [80, "一眼能懂"],
+    [60, "基本清楚"],
+    [40, "比较模糊"],
+    [0, "说不清"],
+  ],
+  confidence: [
+    [80, "信心充足"],
+    [60, "有把握"],
+    [40, "待观察"],
+    [0, "信心不足"],
+  ],
+};
+function gradeOf(dim, score) {
+  for (const [min, label] of GRADE_BANDS[dim] || [])
+    if (score >= min) return label;
+  return "—";
+}
+function gradeClass(score) {
+  return score >= 80 ? "g1" : score >= 60 ? "g2" : score >= 40 ? "g3" : "g4";
+}
+function computeScores(criteria) {
+  const dimension = (keys) => {
+    const values = keys.map((key) => LEVEL_VALUE[criteria?.[key]] ?? 0);
+    return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
+  };
+  const feasibility = dimension(["f1", "f2", "f3"]);
+  const impact = dimension(["m1", "m2", "m3"]);
+  const clarity = dimension(["c1", "c2", "c3"]);
+  return {
+    feasibility,
+    impact,
+    clarity,
+    confidence: Math.round(feasibility * 0.35 + impact * 0.35 + clarity * 0.3),
+  };
+}
+function renderScoreSection(idea) {
+  if (!idea.criteria || !idea.scores) {
+    return `<div class="score-grid">${metric("可实现性", idea.feasibility)}${metric("潜在价值", idea.impact)}${metric("表达清晰", idea.clarity)}${metric("综合信心", idea.confidence)}</div><div class="local-scan-note">这份想法还没有分项依据。${ai.apiKey ? "点击下方「✦ AI 重新评估」可生成基于证据的完整拆解。" : "连接 AI 接口后可生成基于证据的完整拆解。"}</div>`;
+  }
+  const cards = Object.entries(RUBRIC)
+    .map(([dim, group]) => {
+      const score = idea.scores[dim] ?? 0;
+      const list = group.items
+        .map(({ key, label }) => {
+          const level = idea.criteria[dim]?.[key] || "no";
+          const cls = level === "yes" ? "ok" : level === "part" ? "half" : "miss";
+          const mark = level === "yes" ? "✓" : level === "part" ? "◐" : "✗";
+          const evidence = idea.evidence?.[key];
+          return `<li class="${cls}"><i>${mark}</i><div><b>${label}</b>${evidence ? `<small>${esc(evidence)}</small>` : ""}</div></li>`;
+        })
+        .join("");
+      return `<article class="dim-card"><header><b>${group.label}</b><span class="grade ${gradeClass(score)}">${gradeOf(dim, score)}</span><strong>${score}</strong></header><ul class="crit-list">${list}</ul></article>`;
+    })
+    .join("");
+  const tips = (Array.isArray(idea.tips) && idea.tips.length
+    ? idea.tips
+    : []
+  )
+    .map((tip) => `<li>${esc(tip)}</li>`)
+    .join("");
+  const localNote = idea.local
+    ? `<div class="local-scan-note"><b>关键词速览</b>：以上仅反映描述中的词面信息，不是严肃评估。${ai.apiKey ? "点击下方「✦ AI 重新评估」生成基于证据的完整评估。" : "连接 AI 接口后可获得基于证据的完整评估。"}</div>`
+    : "";
+  return `<div class="score-head"><span class="scan-badge ${idea.local ? "" : "evidence"}">${idea.local ? "关键词速览 · 本地粗估" : "基于证据评估"}</span></div><div class="dim-cards">${cards}</div>${localNote}${tips ? `<section class="tips-box"><small>如何提高</small><ul>${tips}</ul></section>` : ""}`;
 }
 function metric(label, value) {
   return `<div class="metric"><span>${label}</span><div><i style="width:${Number(value) || 0}%"></i></div><strong>${Number(value) || 0}</strong></div>`;
@@ -343,6 +476,7 @@ async function saveDraft() {
     try {
       const analysis = await analyzeWithModel(content);
       Object.assign(idea, analysis, { updatedAt: Date.now() });
+      delete idea.local;
       saveIdeas();
       toast("真实大模型分析完成");
     } catch (error) {
@@ -353,41 +487,104 @@ async function saveDraft() {
 }
 function heuristic(content) {
   const clean = content.replace(/\s+/g, " ").trim();
-  const audience = /(用户|人群|创作者|学生|团队|企业|客户)/.test(clean),
-    action = /(制作|开发|建立|设计|帮助|解决|记录|验证|实现)/.test(clean),
-    outcome = /(提高|减少|更快|价值|效率|成长|落地)/.test(clean);
-  const clarity = Math.min(
-    92,
-    42 +
-      Math.min(18, Math.floor(clean.length / 8)) +
-      (audience ? 14 : 0) +
-      (action ? 12 : 0),
+  const has = (re) => re.test(clean);
+  const hit = (re) => {
+    const m = clean.match(re);
+    return m ? m[0] : "";
+  };
+  const audience = /(用户|人群|创作者|学生|团队|企业|客户|设计师|男生|女生|开发者)/.test(
+    clean,
   );
-  const feasibility = Math.min(
-    90,
-    50 + (action ? 13 : 0) + (clean.length > 24 ? 10 : 0),
+  const audienceHit = hit(
+    /(用户|人群|创作者|学生|团队|企业|客户|设计师|男生|女生|开发者)/,
   );
-  const impact = Math.min(92, 48 + (outcome ? 18 : 0) + (audience ? 10 : 0));
-  const tags = [
-    /(产品|工具|软件|网站|应用|平台)/.test(clean) ? "产品" : null,
-    /(内容|写作|视频|播客|声音|创作)/.test(clean) ? "内容" : null,
-    /(学习|知识|课程|教育)/.test(clean) ? "学习" : null,
-    /(生活|习惯|健康|每周|每天)/.test(clean) ? "生活" : null,
-  ].filter(Boolean);
-  if (!tags.length) tags.push("新想法");
+  const criteria = {
+    feasibility: {
+      f1: has(/开源|现成|成熟|API|接口|框架|工具|平台/)
+        ? "yes"
+        : has(/开发|实现|制作|设计/)
+          ? "part"
+          : "no",
+      f2: has(/一个人|独立|自己|最小|简单|轻松/)
+        ? "yes"
+        : has(/开发|实现|制作/)
+          ? "part"
+          : "no",
+      f3: has(/需要资金|融资|线下|牌照|审批/)
+        ? "no"
+        : has(/需要|依赖|成本|团队/)
+          ? "part"
+          : "yes",
+    },
+    impact: {
+      m1: audience ? "yes" : "no",
+      m2: has(/每天|每周|经常|总是|痛点|麻烦|问题|效率|更快|提高|减少/)
+        ? "yes"
+        : has(/帮助|解决|价值/)
+          ? "part"
+          : "no",
+      m3: has(/付费|收费|订阅|价格|购买|推荐|分享|传播/)
+        ? "yes"
+        : has(/价值|帮助/)
+          ? "part"
+          : "no",
+    },
+    clarity: {
+      c1: audience ? "yes" : "no",
+      c2: has(/解决|帮助|问题|需求|想要|希望/)
+        ? "yes"
+        : has(/制作|开发|设计/)
+          ? "part"
+          : "no",
+      c3: has(/app|应用|网站|工具|平台|原型|上线|版本|页面/i)
+        ? "yes"
+        : has(/记录|管理|整理/)
+          ? "part"
+          : "no",
+    },
+  };
+  const evidence = {};
+  const evidenceFor = (key, re, label) => {
+    const found = hit(re);
+    return { [key]: found ? `描述中提到「${found}」` : label };
+  };
+  Object.assign(
+    evidence,
+    evidenceFor("f1", /开源|现成|成熟|API|接口|框架|工具|平台|开发|实现|制作|设计/, ""),
+    evidenceFor("f2", /一个人|独立|自己|最小|简单|轻松|开发|实现|制作/, ""),
+    evidenceFor("f3", /需要资金|融资|线下|牌照|审批|需要|依赖|成本|团队/, ""),
+    evidenceFor("m1", /用户|人群|创作者|学生|团队|企业|客户|设计师|男生|女生|开发者/, "描述中未明确目标人群"),
+    evidenceFor("m2", /每天|每周|经常|总是|痛点|麻烦|问题|效率|更快|提高|减少|帮助|解决|价值/, ""),
+    evidenceFor("m3", /付费|收费|订阅|价格|购买|推荐|分享|传播|价值|帮助/, "描述中未提及付费或传播"),
+    { c1: audience ? `描述中提到「${audienceHit}」` : "描述中未说明给谁用" },
+    evidenceFor("c2", /解决|帮助|问题|需求|想要|希望|制作|开发|设计/, ""),
+    evidenceFor("c3", /app|应用|网站|工具|平台|原型|上线|版本|页面|记录|管理|整理/i, "描述中未描述成果形态"),
+  );
+  const tips = Object.entries(criteria)
+    .flatMap(([, items]) =>
+      Object.entries(items)
+        .filter(([, level]) => level !== "yes")
+        .map(([key]) => RUBRIC_TIPS[key]),
+    )
+    .filter(Boolean)
+    .slice(0, 3);
   const missing = !audience
     ? "目标用户仍不够明确"
-    : !outcome
-      ? "预期价值还缺少可衡量的结果"
-      : "用户是否愿意改变现有行为尚未验证";
+    : "预期价值还缺少可衡量的结果";
   return {
     title: clean.length > 32 ? `${clean.slice(0, 30)}…` : clean,
     summary: `当前最值得补充的是：${missing}。`,
-    tags,
-    feasibility,
-    impact,
-    clarity,
-    confidence: Math.round((clarity + feasibility + impact) / 3) - 5,
+    tags: [
+      /(产品|工具|软件|网站|应用|平台)/.test(clean) ? "产品" : null,
+      /(内容|写作|视频|播客|声音|创作)/.test(clean) ? "内容" : null,
+      /(学习|知识|课程|教育)/.test(clean) ? "学习" : null,
+      /(生活|习惯|健康|每周|每天)/.test(clean) ? "生活" : null,
+    ].filter(Boolean),
+    criteria,
+    evidence,
+    tips,
+    scores: computeScores(criteria),
+    local: true,
     risk: `${missing}。如果假设不成立，继续投入会增加沉没成本。`,
     nextAction: !audience
       ? "写出最可能需要它的一类人，并找 1 位真实对象聊 15 分钟。"
@@ -437,8 +634,29 @@ function sanitizeAnalysis(raw) {
   const data = raw && typeof raw === "object" ? raw : {};
   const text = (value, fallback) =>
     typeof value === "string" && value.trim() ? value.trim() : fallback;
-  const score = (value) =>
-    Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  const level = (value) =>
+    value === "yes" || value === "part" || value === "no" ? value : "part";
+  const rawCriteria =
+    data.criteria && typeof data.criteria === "object" ? data.criteria : {};
+  const criteria = {};
+  Object.entries(RUBRIC).forEach(([dim, group]) => {
+    criteria[dim] = {};
+    group.items.forEach(({ key }) => {
+      criteria[dim][key] = level(rawCriteria[dim]?.[key]);
+    });
+  });
+  const rawEvidence =
+    data.evidence && typeof data.evidence === "object" ? data.evidence : {};
+  const evidence = {};
+  Object.values(RUBRIC)
+    .flatMap((group) => group.items)
+    .forEach(({ key }) => {
+      evidence[key] = text(rawEvidence[key], "").slice(0, 24);
+    });
+  const tips = (Array.isArray(data.tips) ? data.tips : [])
+    .filter((tip) => typeof tip === "string" && tip.trim())
+    .map((tip) => tip.trim().slice(0, 40))
+    .slice(0, 3);
   const tags = Array.isArray(data.tags)
     ? data.tags
         .filter((tag) => typeof tag === "string" && tag.trim())
@@ -449,21 +667,28 @@ function sanitizeAnalysis(raw) {
     title: text(data.title, "未命名想法").slice(0, 60),
     summary: text(data.summary, ""),
     tags: tags.length ? tags : ["想法"],
-    feasibility: score(data.feasibility),
-    impact: score(data.impact),
-    clarity: score(data.clarity),
-    confidence: score(data.confidence),
+    criteria,
+    evidence,
+    tips,
+    scores: computeScores(criteria),
     risk: text(data.risk, "暂待评估"),
     nextAction: text(data.nextAction, "先定义一个最小的验证动作。"),
   };
 }
 async function analyzeWithModel(content) {
+  const rubricText = Object.entries(RUBRIC)
+    .map(
+      ([dim, group]) =>
+        `${group.label}: ${group.items
+          .map(({ key, label }) => `${key}=${label}`)
+          .join("，")}`,
+    )
+    .join("；");
   const reply = await callModel(
     [
       {
         role: "system",
-        content:
-          "你是严格务实的创新评审。只返回有效JSON，字段：title,summary,tags数组,feasibility,impact,clarity,confidence(0-100整数),risk,nextAction。不要迎合，结论具体可验证。",
+        content: `你是严格务实的创新评审。评估维度与评估项：\n${rubricText}\n只返回JSON：{"criteria":{"feasibility":{"f1":"yes|part|no","f2":"...","f3":"..."},"impact":{"m1":"...","m2":"...","m3":"..."},"clarity":{"c1":"...","c2":"...","c3":"..."}},"evidence":{"f1":"依据，引用或概括用户原文，不超过16字","f2":"...","f3":"...","m1":"...","m2":"...","m3":"...","c1":"...","c2":"...","c3":"..."},"tips":["针对未满足评估项的提升建议，最多3条"],"summary":"一句话总评，不超过40字","risk":"最关键的待验证假设，不超过40字","nextAction":"最低成本的下一步行动，不超过30字","tags":["标签"]}\n判定标准：yes=描述中有明确支持；part=隐含提及但有不确定性；no=完全没有依据。分数由系统按标准计算，你不需要给出任何分数。宁可严格，不要迎合，结论具体可验证。`,
       },
       { role: "user", content: `分析这个想法：\n${content}` },
     ],
@@ -515,7 +740,7 @@ function renderIdeaSheet(idea) {
 }
 function ideaTabContent(idea) {
   if (selectedTab === "analysis")
-    return `<section class="analysis-summary"><span>✦ 分析结论</span><p>${esc(idea.summary)}</p></section><div class="score-grid">${metric("可实现性", idea.feasibility)}${metric("潜在价值", idea.impact)}${metric("表达清晰", idea.clarity)}${metric("综合信心", idea.confidence)}</div><section class="risk-box"><small>关键风险 / 待验证假设</small><p>${esc(idea.risk)}</p></section><section class="action-box"><small>推荐的下一步最小行动</small><h3>${esc(idea.nextAction)}</h3><div class="action-actions">${["计划中", "行动中", "已完成", "已搁置"].map((status) => `<button data-action="status" data-id="${esc(idea.id)}" data-status="${status}">${status}</button>`).join("")}</div><div class="edit-row"><button data-action="edit-idea">✎ 编辑想法</button>${ai.apiKey ? `<button data-action="reanalyze-idea" ${reanalyzing ? "disabled" : ""}>${reanalyzing ? "✦ 评估中…" : "✦ AI 重新评估"}</button>` : ""}</div></section>`;
+    return `<section class="analysis-summary"><span>✦ 分析结论</span><p>${esc(idea.summary)}</p></section>${renderScoreSection(idea)}<section class="risk-box"><small>关键风险 / 待验证假设</small><p>${esc(idea.risk)}</p></section><section class="action-box"><small>推荐的下一步最小行动</small><h3>${esc(idea.nextAction)}</h3><div class="action-actions">${["计划中", "行动中", "已完成", "已搁置"].map((status) => `<button data-action="status" data-id="${esc(idea.id)}" data-status="${status}">${status}</button>`).join("")}</div><div class="edit-row"><button data-action="edit-idea">✎ 编辑想法</button>${ai.apiKey ? `<button data-action="reanalyze-idea" ${reanalyzing ? "disabled" : ""}>${reanalyzing ? "✦ 评估中…" : "✦ AI 重新评估"}</button>` : ""}</div></section>`;
   if (selectedTab === "history") {
     const history = Array.isArray(idea.history) ? idea.history : [];
     if (!history.length)
@@ -785,6 +1010,7 @@ async function reanalyzeIdea() {
     const analysis = await analyzeWithModel(idea.content);
     const { title, ...aiFields } = analysis;
     Object.assign(idea, aiFields, { updatedAt: Date.now() });
+    delete idea.local;
     if (!Array.isArray(idea.history)) idea.history = [];
     idea.history.push({
       at: Date.now(),
