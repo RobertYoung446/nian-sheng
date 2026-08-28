@@ -2107,3 +2107,109 @@ a:focus-visible {
   font-size: 10px;
   letter-spacing: 0.02em;
 }
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #3d5f4d;
+  font-size: 11px;
+  font-weight: 700;
+}
+.edit-form input,
+.edit-form textarea {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  outline: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+}
+.edit-form textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.6;
+}
+.edit-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.edit-row button {
+  padding: 7px 10px;
+  border: 1px solid rgba(47, 99, 70, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #2f654b;
+  font-size: 11px;
+}
+.edit-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.history-item {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
+}
+.history-item.ai {
+  border-style: dashed;
+  background: rgba(221, 240, 228, 0.4);
+}
+.history-date {
+  margin-bottom: 6px;
+  color: #8b9690;
+  font-size: 10px;
+}
+.history-reason {
+  color: #2d5b45;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.history-goal {
+  margin-top: 6px;
+  color: #4f6d5e;
+  font-size: 11px;
+}
+.history-goal::before {
+  content: "目标 ";
+  color: #7f948a;
+}
+.history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.history-diff .before {
+  color: #a0624e;
+  text-decoration: line-through;
+}
+.history-diff .after {
+  color: #2e6b4e;
+}
+.history-empty {
+  padding: 40px 20px;
+  border: 1px dashed rgba(40, 90, 64, 0.2);
+  border-radius: 14px;
+  color: #718078;
+  font-size: 12px;
+  line-height: 2;
+  text-align: center;
+}

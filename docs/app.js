@@ -1,7 +1,7 @@
 const STORAGE_KEY = "niansheng-public-v1";
 const STORAGE_BACKUP = "niansheng-public-backup-v1";
 const AI_STORAGE_KEY = "niansheng-ai-config-v1";
-console.log("[念生] app.js 版本 20260827-11（多角度检索与相关性过滤）");
+console.log("[念生] app.js 版本 20260827-12（想法编辑与演变历程）");
 const sampleIdeas = [
   {
     id: "sample-1",
@@ -79,6 +79,8 @@ let oceanCleanup = null;
 let lastFocusedNode = null;
 let chatThinking = false;
 let cardClickTimer = null;
+let editingIdea = false;
+let reanalyzing = false;
 let ideas = loadIdeas();
 let currentView = "today";
 let filter = "全部";
@@ -477,6 +479,7 @@ function openIdea(id, tab = "analysis") {
   selectedTab = tab;
   chatMessages = [];
   chatThinking = false;
+  editingIdea = false;
   if (research.ideaId !== id)
     research = {
       ideaId: id,
@@ -499,16 +502,39 @@ function restoreFocus() {
   if (lastFocusedNode?.isConnected) lastFocusedNode.focus();
   lastFocusedNode = null;
 }
+function editFormHTML(idea) {
+  return `<div class="edit-form"><label>标题<input id="editTitle" value="${esc(idea.title)}"></label><label>描述<textarea id="editContent">${esc(idea.content)}</textarea></label><label>修改原因（必填）<textarea id="editReason" placeholder="为什么修改？比如：和用户聊完发现他们在意的其实是预览效果…"></textarea></label><label>对应目标（选填）<input id="editGoal" placeholder="这次修改服务于什么目标？"></label><div class="edit-row"><button class="primary pressable" data-action="save-edit">保存修改</button><button data-action="cancel-edit">取消</button></div></div>`;
+}
 function renderIdeaSheet(idea) {
   if (!idea) return;
   const fresh = !modalRoot.childElementCount;
   if (fresh) lastFocusedNode = document.activeElement;
-  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass"><header><div><span>${esc(idea.status)}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button></div><div class="sheet-body">${ideaTabContent(idea)}</div></section></div>`;
+  const body = editingIdea ? editFormHTML(idea) : ideaTabContent(idea);
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass"><header><div><span>${esc(idea.status)}${Array.isArray(idea.history) && idea.history.length ? ` · 已演变 ${idea.history.length} 次` : ""}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button><button class="${selectedTab === "history" ? "active" : ""}" data-action="idea-tab" data-tab="history">演变历程</button></div><div class="sheet-body">${body}</div></section></div>`;
   if (fresh) modalRoot.querySelector(".close")?.focus();
 }
 function ideaTabContent(idea) {
   if (selectedTab === "analysis")
-    return `<section class="analysis-summary"><span>✦ 分析结论</span><p>${esc(idea.summary)}</p></section><div class="score-grid">${metric("可实现性", idea.feasibility)}${metric("潜在价值", idea.impact)}${metric("表达清晰", idea.clarity)}${metric("综合信心", idea.confidence)}</div><section class="risk-box"><small>关键风险 / 待验证假设</small><p>${esc(idea.risk)}</p></section><section class="action-box"><small>推荐的下一步最小行动</small><h3>${esc(idea.nextAction)}</h3><div class="action-actions">${["计划中", "行动中", "已完成", "已搁置"].map((status) => `<button data-action="status" data-id="${esc(idea.id)}" data-status="${status}">${status}</button>`).join("")}</div></section>`;
+    return `<section class="analysis-summary"><span>✦ 分析结论</span><p>${esc(idea.summary)}</p></section><div class="score-grid">${metric("可实现性", idea.feasibility)}${metric("潜在价值", idea.impact)}${metric("表达清晰", idea.clarity)}${metric("综合信心", idea.confidence)}</div><section class="risk-box"><small>关键风险 / 待验证假设</small><p>${esc(idea.risk)}</p></section><section class="action-box"><small>推荐的下一步最小行动</small><h3>${esc(idea.nextAction)}</h3><div class="action-actions">${["计划中", "行动中", "已完成", "已搁置"].map((status) => `<button data-action="status" data-id="${esc(idea.id)}" data-status="${status}">${status}</button>`).join("")}</div><div class="edit-row"><button data-action="edit-idea">✎ 编辑想法</button>${ai.apiKey ? `<button data-action="reanalyze-idea" ${reanalyzing ? "disabled" : ""}>${reanalyzing ? "✦ 评估中…" : "✦ AI 重新评估"}</button>` : ""}</div></section>`;
+  if (selectedTab === "history") {
+    const history = Array.isArray(idea.history) ? idea.history : [];
+    if (!history.length)
+      return '<div class="history-empty">这个想法还没有演变记录。<br>点击「编辑想法」修改后，每一次改动的原因和目标都会留在这里。</div>';
+    return `<div class="history-list">${[...history]
+      .reverse()
+      .map((entry) => {
+        const date = new Date(entry.at);
+        const dateText = Number.isNaN(date.getTime())
+          ? ""
+          : date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+        const changedTitle =
+          entry.before && entry.before.title !== entry.after?.title;
+        const changedContent =
+          entry.before && entry.before.content !== entry.after?.content;
+        return `<article class="history-item${entry.ai ? " ai" : ""}"><div class="history-date">${dateText}${entry.ai ? " · AI 辅助" : ""}</div><div class="history-reason">${esc(entry.reason || "")}</div>${entry.goal ? `<div class="history-goal">${esc(entry.goal)}</div>` : ""}${entry.before && (changedTitle || changedContent) ? `<div class="history-diff">${changedTitle ? `<div><span class="before">${esc(entry.before.title)}</span> → <span class="after">${esc(entry.after?.title || "")}</span></div>` : ""}${changedContent ? `<div><span class="before">${esc((entry.before.content || "").slice(0, 60))}${(entry.before.content || "").length > 60 ? "…" : ""}</span></div><div><span class="after">${esc((entry.after?.content || "").slice(0, 60))}${(entry.after?.content || "").length > 60 ? "…" : ""}</span></div>` : ""}</div>` : ""}</article>`;
+      })
+      .join("")}</div>`;
+  }
   if (selectedTab === "talk") {
     const lead = ai.apiKey
       ? ""
@@ -523,6 +549,7 @@ function ideaTabContent(idea) {
 function closeModal() {
   modalRoot.innerHTML = "";
   selectedId = null;
+  editingIdea = false;
   restoreFocus();
 }
 function confirmDelete(idea) {
@@ -713,6 +740,64 @@ async function generateOpener(idea) {
     renderIdeaSheet(idea);
     scrollChatToBottom();
   }
+}
+function saveIdeaEdit() {
+  const idea = shownIdeas().find((item) => item.id === selectedId);
+  if (!idea) return;
+  const title = document.querySelector("#editTitle")?.value.trim();
+  const content = document.querySelector("#editContent")?.value.trim();
+  const reason = document.querySelector("#editReason")?.value.trim();
+  const goal = document.querySelector("#editGoal")?.value.trim();
+  if (!title || !content) {
+    toast("标题和描述不能为空");
+    return;
+  }
+  if (!reason) {
+    toast("请填写修改原因——这正是演变记录的价值所在");
+    return;
+  }
+  if (!Array.isArray(idea.history)) idea.history = [];
+  idea.history.push({
+    at: Date.now(),
+    reason,
+    goal,
+    before: { title: idea.title, content: idea.content },
+    after: { title, content },
+  });
+  idea.title = title;
+  idea.content = content;
+  idea.updatedAt = Date.now();
+  saveIdeas();
+  editingIdea = false;
+  renderIdeaSheet(idea);
+  toast("已保存修改，已记录本次演变");
+}
+async function reanalyzeIdea() {
+  if (!ai.apiKey) {
+    toast("连接 AI 后可重新评估");
+    return;
+  }
+  const idea = shownIdeas().find((item) => item.id === selectedId);
+  if (!idea || reanalyzing) return;
+  reanalyzing = true;
+  renderIdeaSheet(idea);
+  try {
+    const analysis = await analyzeWithModel(idea.content);
+    const { title, ...aiFields } = analysis;
+    Object.assign(idea, aiFields, { updatedAt: Date.now() });
+    if (!Array.isArray(idea.history)) idea.history = [];
+    idea.history.push({
+      at: Date.now(),
+      reason: "AI 重新评估（基于最新描述）",
+      ai: true,
+    });
+    saveIdeas();
+    toast("AI 已基于最新描述重新评估");
+  } catch (error) {
+    toast(error.message || "重新评估失败");
+  }
+  reanalyzing = false;
+  if (sheetStillOpen()) renderIdeaSheet(idea);
 }
 async function sendChat() {
   if (chatThinking) return;
@@ -1837,6 +1922,7 @@ document.addEventListener("click", (event) => {
   }
   if (action === "idea-tab") {
     selectedTab = target.dataset.tab;
+    editingIdea = false;
     const idea = shownIdeas().find((item) => item.id === selectedId);
     renderIdeaSheet(idea);
     if (
@@ -1885,6 +1971,16 @@ document.addEventListener("click", (event) => {
       toast(`已删除「${removed.title.slice(0, 14)}」`);
     }
   }
+  if (action === "edit-idea") {
+    editingIdea = true;
+    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+  }
+  if (action === "cancel-edit") {
+    editingIdea = false;
+    renderIdeaSheet(shownIdeas().find((item) => item.id === selectedId));
+  }
+  if (action === "save-edit") saveIdeaEdit();
+  if (action === "reanalyze-idea") reanalyzeIdea();
   if (action === "open-data") showDataModal();
   if (action === "export-data") exportData();
   if (action === "save-ai") saveAi();
