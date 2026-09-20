@@ -451,13 +451,31 @@ function renderReview() {
     )}</div><div class="review-grid"><article class="review-card"><span>✦ 本周观察</span><h3>${ideas.length ? "你开始把模糊念头变成可讨论的对象。" : "第一条真实记录就是最重要的开始。"}</h3><p>${ideas.length ? "下一周不要增加更多项目，先完成一个最低成本验证。" : "记录一个你最近三次想到的问题。不必完整，只要真实。"}</p></article><article class="review-card"><span>下周建议</span><ol><li>只选择一个想法进入行动中</li><li>安排一次不超过 30 分钟的真实验证</li><li>周日回来记录：我学到了什么？</li></ol></article></div>`;
 }
 
+let captureSaving = false;
+let captureDraft = "";
+function openCapture() {
+  captureDraft = document.querySelector("#ideaDraft")?.value || captureDraft;
+  rememberFocus();
+  modalRoot.innerHTML = `<div class="capture-scrim"><section class="capture-popover" data-motion-panel data-motion-key="capture" role="dialog" aria-modal="true" aria-label="记录想法"><button class="capture-close" data-motion-close data-action="close-capture" aria-label="关闭记录，保留草稿">×</button><section class="capture-card"><div class="capture-head"><span>✦</span><div><h2>捕捉刚刚闪过的念头</h2><p>不用整理，先把它留下来</p></div></div><textarea id="quickDraft" aria-label="记录新想法" placeholder="我刚想到……">${esc(captureDraft)}</textarea><div class="capture-footer"><span>保存在当前浏览器 · Ctrl / ⌘ + Enter 保存</span><button class="primary pressable" data-action="save-idea">收进灵感箱</button></div></section></section></div>`;
+  const input = document.querySelector("#quickDraft");
+  input.addEventListener("input", () => { captureDraft = input.value; });
+  input.addEventListener("keydown", event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); saveDraft(); } });
+  modalRoot.querySelector('.capture-scrim').addEventListener('click', event => { if (event.target === event.currentTarget) closeCapture(); });
+}
+function closeCapture() {
+  captureDraft = document.querySelector("#quickDraft")?.value ?? captureDraft;
+  const finish = () => { modalRoot.innerHTML = ""; const draft = document.querySelector("#ideaDraft"); if (draft) draft.value = captureDraft; restoreFocus(); };
+  if (window.nianMotion) window.nianMotion.dismiss(modalRoot.querySelector('.capture-popover'), finish); else finish();
+}
 async function saveDraft() {
-  const node = document.querySelector("#ideaDraft");
+  if (captureSaving) return;
+  const node = document.querySelector("#quickDraft") || document.querySelector("#ideaDraft");
   const content = node?.value.trim();
   if (!content) {
     toast("先写下一点什么吧");
     return;
   }
+  captureSaving = true;
   const basic = heuristic(content);
   const idea = {
     id: crypto.randomUUID(),
@@ -468,8 +486,13 @@ async function saveDraft() {
     ...basic,
   };
   ideas.unshift(idea);
-  saveIdeas();
+  try { saveIdeas(); } catch { ideas.shift(); captureSaving = false; toast("保存失败，草稿已保留，请重试"); return; }
   node.value = "";
+  captureDraft = "";
+  const fromPopup = node.id === "quickDraft";
+  if (fromPopup) closeCapture();
+  document.querySelector('#aiButton')?.classList.toggle('motion-busy', Boolean(ai.apiKey));
+  document.querySelector('#aiButton')?.setAttribute('aria-busy', String(Boolean(ai.apiKey)));
   toast("已保存到当前浏览器");
   if (ai.apiKey) {
     toast("已保存，真实模型正在分析");
@@ -483,7 +506,10 @@ async function saveDraft() {
       toast(error.message || "模型连接失败，已保留本地分析");
     }
   }
-  render("today");
+  captureSaving = false;
+  document.querySelector('#aiButton')?.classList.remove('motion-busy');
+  document.querySelector('#aiButton')?.setAttribute('aria-busy', 'false');
+  render(fromPopup ? currentView : "today");
 }
 function heuristic(content) {
   const clean = content.replace(/\s+/g, " ").trim();
@@ -735,7 +761,7 @@ function renderIdeaSheet(idea) {
   const fresh = !modalRoot.childElementCount;
   if (fresh) lastFocusedNode = document.activeElement;
   const body = editingIdea ? editFormHTML(idea) : ideaTabContent(idea);
-  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass"><header><div><span>${esc(idea.status)}${Array.isArray(idea.history) && idea.history.length ? ` · 已演变 ${idea.history.length} 次` : ""}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button><button class="${selectedTab === "history" ? "active" : ""}" data-action="idea-tab" data-tab="history">演变历程</button></div><div class="sheet-body">${body}</div></section></div>`;
+  modalRoot.innerHTML = `<div class="scrim" data-action="close-modal"><section class="sheet glass ${reanalyzing ? "motion-busy" : ""}" data-motion-panel data-motion-key="idea-${esc(idea.id)}" role="dialog" aria-modal="true" aria-label="${esc(idea.title)}"><button class="motion-handle" type="button" aria-label="调整详情高度">拖动调整</button><header><div><span>${esc(idea.status)}${Array.isArray(idea.history) && idea.history.length ? ` · 已演变 ${idea.history.length} 次` : ""}</span><h2>${esc(idea.title)}</h2><p>${esc(idea.content)}</p></div><button class="close pressable" data-motion-close data-action="close-modal">×</button></header><div class="tabs"><button class="${selectedTab === "analysis" ? "active" : ""}" data-action="idea-tab" data-tab="analysis">结构化分析</button><button class="${selectedTab === "talk" ? "active" : ""}" data-action="idea-tab" data-tab="talk">质疑与讨论</button><button class="${selectedTab === "research" ? "active" : ""}" data-action="idea-tab" data-tab="research">最新进展</button><button class="${selectedTab === "history" ? "active" : ""}" data-action="idea-tab" data-tab="history">演变历程</button></div><div class="sheet-body">${body}</div></section></div>`;
   if (fresh) modalRoot.querySelector(".close")?.focus();
 }
 function ideaTabContent(idea) {
@@ -772,10 +798,9 @@ function ideaTabContent(idea) {
   if (selectedTab === "research") return researchTabContent(idea);
 }
 function closeModal() {
-  modalRoot.innerHTML = "";
-  selectedId = null;
-  editingIdea = false;
-  restoreFocus();
+  const finish = () => { modalRoot.innerHTML = ""; selectedId = null; editingIdea = false; restoreFocus(); };
+  const panel = modalRoot.querySelector('[data-motion-panel]');
+  if (panel && window.nianMotion) window.nianMotion.dismiss(panel, finish); else finish();
 }
 function confirmDelete(idea) {
   rememberFocus();
@@ -1479,7 +1504,7 @@ let oceanState = null;
 async function openOcean() {
   if (document.querySelector("#ocean")) return;
   const list = shownIdeas();
-  modalRoot.innerHTML = `<section class="ocean" id="ocean"><canvas></canvas><div class="ocean-grain"></div><div class="ocean-viewport"><svg class="ocean-svg" id="oceanSvg"></svg><div class="ocean-nodes" id="oceanNodes"></div></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住海面拖动 · 悬停想法查看关系 · 点击查看详情</p></div><div class="engine-state"><i></i><b id="oceanStatus">${ai.apiKey ? "AI 正在分析想法结构…" : "本地模式 · 按标签聚类"}</b></div><button class="panel-toggle pressable" data-action="ocean-panel">洞察</button><button class="close pressable" data-action="close-ocean">×</button></header><div class="ocean-legend" id="oceanLegend" hidden></div><aside class="ocean-panel glass" id="oceanPanel"></aside><div class="ocean-hint glass" id="oceanHint" hidden></div><div class="drag-hint">拖动漫游 · 滚轮缩放 · 右侧洞察面板可跳转聚焦</div></section>`;
+  modalRoot.innerHTML = `<section class="ocean" id="ocean" data-motion-panel data-motion-key="ocean" role="dialog" aria-modal="true" aria-label="想法关系海"><canvas></canvas><div class="ocean-grain"></div><div class="ocean-viewport"><svg class="ocean-svg" id="oceanSvg"></svg><div class="ocean-nodes" id="oceanNodes"></div></div><header class="ocean-toolbar glass"><div><span>AI IDEA OCEAN</span><h2>想法关系海</h2><p>按住海面拖动 · 悬停想法查看关系 · 点击查看详情</p></div><div class="engine-state ${ai.apiKey ? "loading" : ""}"><i></i><b id="oceanStatus">${ai.apiKey ? "AI 正在分析想法结构…" : "本地模式 · 按标签聚类"}</b></div><button class="panel-toggle pressable" data-action="ocean-panel">洞察</button><button class="close pressable" data-motion-close data-action="close-ocean">×</button></header><div class="ocean-legend" id="oceanLegend" hidden></div><aside class="ocean-panel glass" id="oceanPanel"></aside><div class="ocean-hint glass" id="oceanHint" hidden></div><div class="drag-hint">拖动漫游 · 滚轮缩放 · 右侧洞察面板可跳转聚焦</div></section>`;
   const oceanEl = document.querySelector("#ocean");
   const canvas = oceanEl.querySelector("canvas");
   rememberFocus();
@@ -1630,9 +1655,11 @@ async function openOcean() {
       renderOceanWorld();
       renderOceanLegend();
       renderOceanPanel();
+      document.querySelector("#oceanStatus")?.parentElement.classList.remove("loading");
       document.querySelector("#oceanStatus").textContent = `AI 已完成分析 · ${oceanState.clusters.length} 个簇群 · ${oceanState.edges.length} 条关系`;
     } catch (error) {
       if (document.querySelector("#ocean")) {
+        document.querySelector("#oceanStatus")?.parentElement.classList.remove("loading");
         document.querySelector("#oceanStatus").textContent =
           "AI 分析失败 · 已降级为标签聚类";
         toast(error.message || "关系分析失败，已使用本地聚类");
@@ -1640,12 +1667,12 @@ async function openOcean() {
     }
   }
 }
-function closeOcean() {
+function closeOcean(immediate = false) {
   oceanCleanup?.();
   oceanCleanup = null;
   oceanState = null;
-  modalRoot.innerHTML = "";
-  restoreFocus();
+  const finish = () => { modalRoot.innerHTML = ""; restoreFocus(); };
+  if (!immediate && window.nianMotion) window.nianMotion.dismiss(document.querySelector("#ocean"), finish); else finish();
 }
 function clusterizeByTags(list) {
   const groups = new Map();
@@ -2003,7 +2030,7 @@ function renderOceanPanel() {
         `<button class="panel-row" data-action="ocean-focus" data-id="${esc(merge.sourceId)}"><span>可合并 · ${esc(merge.a)} ≈ ${esc(merge.b)}</span><b>${Math.round(merge.strength * 100)}%</b></button>`,
     )
     .join("");
-  box.innerHTML = `<div class="panel-head"><span>OCEAN INSIGHTS</span><b>${st.list.length} 个想法 · ${st.edges.length} 条关系</b>${st.advice ? `<p>${esc(st.advice)}</p>` : ""}</div><div class="panel-sec"><small>想法簇群</small>${clustersBlock}</div>${st.modelDone ? `<div class="panel-sec"><small>枢纽想法</small>${hubsBlock || '<p class="empty-tip">还没有想法形成多条连接</p>'}</div>` : ""}${st.modelDone && orphanBlock ? `<div class="panel-sec"><small>孤岛想法 · 尚未连接</small>${orphanBlock}</div>` : ""}${conflictBlock ? `<div class="panel-sec"><small>需要注意的冲突</small>${conflictBlock}</div>` : ""}${mergeBlock ? `<div class="panel-sec"><small>相似度极高 · 可考虑合并</small>${mergeBlock}</div>` : ""}${!st.modelDone ? '<div class="panel-note">本地模式：按标签聚类展示，不制造假关系。连接 AI 接口后可解锁语义关系、冲突检测与合并建议。</div>' : ""}`;
+  box.innerHTML = `<button class="motion-handle" type="button" aria-label="调整洞察高度">拖动调整</button><button class="insights-close" data-motion-close data-action="ocean-panel" aria-label="收起洞察">收起</button><div class="panel-head"><span>OCEAN INSIGHTS</span><b>${st.list.length} 个想法 · ${st.edges.length} 条关系</b>${st.advice ? `<p>${esc(st.advice)}</p>` : ""}</div><div class="panel-sec"><small>想法簇群</small>${clustersBlock}</div>${st.modelDone ? `<div class="panel-sec"><small>枢纽想法</small>${hubsBlock || '<p class="empty-tip">还没有想法形成多条连接</p>'}</div>` : ""}${st.modelDone && orphanBlock ? `<div class="panel-sec"><small>孤岛想法 · 尚未连接</small>${orphanBlock}</div>` : ""}${conflictBlock ? `<div class="panel-sec"><small>需要注意的冲突</small>${conflictBlock}</div>` : ""}${mergeBlock ? `<div class="panel-sec"><small>相似度极高 · 可考虑合并</small>${mergeBlock}</div>` : ""}${!st.modelDone ? '<div class="panel-note">本地模式：按标签聚类展示，不制造假关系。连接 AI 接口后可解锁语义关系、冲突检测与合并建议。</div>' : ""}`;
 }
 function setOceanFocus(id, pinned) {
   const st = oceanState;
@@ -2118,9 +2145,9 @@ document.addEventListener("click", (event) => {
   }
   const action = target.dataset.action;
   if (action === "focus-capture") {
-    render("today");
-    setTimeout(() => document.querySelector("#ideaDraft")?.focus(), 0);
+    openCapture();
   }
+  if (action === "close-capture") closeCapture();
   if (action === "save-idea") saveDraft();
   if (action === "open-idea") {
     const tab = target.dataset.tab === "talk" ? "talk" : "analysis";
@@ -2213,7 +2240,7 @@ document.addEventListener("click", (event) => {
   if (action === "open-ocean") openOcean();
   if (action === "close-ocean") closeOcean();
   if (action === "ocean-idea") {
-    closeOcean();
+    closeOcean(true);
     openIdea(target.dataset.id);
   }
   if (action === "ocean-type") {
@@ -2239,8 +2266,15 @@ document.addEventListener("click", (event) => {
     setOceanFocus(target.dataset.id, true);
     centerOnOceanNode(target.dataset.id);
   }
-  if (action === "ocean-panel")
-    document.querySelector("#ocean")?.classList.toggle("panel-open");
+  if (action === "ocean-panel") {
+    const ocean = document.querySelector("#ocean");
+    const panel = document.querySelector("#oceanPanel");
+    const open = ocean?.classList.toggle("panel-open");
+    if (panel && matchMedia('(max-width: 680px)').matches) {
+      if (open) { panel.setAttribute('data-motion-panel', ''); panel.dataset.motionKey = 'insights'; }
+      else panel.removeAttribute('data-motion-panel');
+    }
+  }
 });
 document.addEventListener("change", (event) => {
   if (event.target.matches('[data-action="status-select"]'))
