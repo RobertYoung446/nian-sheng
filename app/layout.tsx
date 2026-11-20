@@ -1,6 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
+import './workspace.css';
+import '../docs/motion.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,6 +17,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: '念生｜让值得实现的想法，真正发生',
   description: '记录灵感、分析可行性、发现想法关系，并把值得做的方向推进成下一步行动。',
+  manifest: '/manifest.webmanifest',
+  applicationName: '念生',
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: '念生',
+  },
   openGraph: {
     title: '念生｜让值得实现的想法，真正发生',
     description: '从灵感捕获到验证、行动与复盘的完整想法工作流。',
@@ -27,6 +40,13 @@ export const metadata: Metadata = {
     description: '从灵感捕获到验证、行动与复盘的完整想法工作流。',
     images: ['https://raw.githubusercontent.com/RobertYoung446/nian-sheng/main/public/og.png'],
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#176b4a',
 };
 
 export default function RootLayout({

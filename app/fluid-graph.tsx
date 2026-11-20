@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from '../features/workspace/components';
+import { layoutGraphPoints, localGraphEdges } from '../lib/workspace-graph';
 
 type GraphIdea = {
   id: string;
   title: string;
   content: string;
   tags: string[];
-  confidence: number;
+  intent?: string;
   status: string;
 };
 export type AiConfig = {
@@ -24,31 +26,53 @@ type Edge = {
 };
 type Point = { id: string; x: number; y: number };
 
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export default function FluidGraph({
   ideas,
   config,
   onClose,
   onOpen,
+  analyze = true,
 }: {
   ideas: GraphIdea[];
   config: AiConfig;
   onClose: () => void;
   onOpen: (idea: GraphIdea) => void;
+  analyze?: boolean;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  useModalFocus(dialogRef, onClose);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef(0);
   const panRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef({ active: false, x: 0, y: 0, ox: 0, oy: 0 });
   const pointerRef = useRef({ x: 0, y: 0 });
-  const [edges, setEdges] = useState<Edge[]>(() => fallbackEdges(ideas));
-  const [mode, setMode] = useState<"loading" | "model" | "local">("loading");
-  const points = useMemo<Point[]>(() => layoutPoints(ideas), [ideas]);
+  const [edges, setEdges] = useState<Edge[]>(() => localGraphEdges(ideas));
+  const [mode, setMode] = useState<"loading" | "model" | "local" | "failed">(analyze ? 'loading' : 'local');
+  const [viewport, setViewport] = useState({width:1200,height:800});
+  const points = useMemo<Point[]>(() => layoutGraphPoints(ideas, viewport.width, viewport.height), [ideas, viewport]);
+  useEffect(() => {
+    const resize = () => setViewport({width:window.innerWidth,height:window.innerHeight});
+    resize(); window.addEventListener('resize',resize);
+    return () => window.removeEventListener('resize',resize);
+  }, []);
 
   useEffect(() => {
+    setEdges(localGraphEdges(ideas));
+    if (!analyze) { setMode('local'); return; }
+    setMode('loading');
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(),50000);
     fetch("/api/ai", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
@@ -62,20 +86,23 @@ export default function FluidGraph({
     })
       .then(async (response) => ({
         ok: response.ok,
-        data: await response.json(),
+        data: recordValue(await response.json()),
       }))
       .then(({ ok, data }) => {
         if (cancelled) return;
-        if (ok && Array.isArray(data.result?.edges)) {
-          setEdges(validEdges(data.result.edges, ideas));
+        const result = recordValue(data.result);
+        if (ok && Array.isArray(result.edges)) {
+          setEdges(validEdges(result.edges, ideas));
           setMode("model");
-        } else setMode("local");
+        } else setMode("failed");
       })
-      .catch(() => setMode("local"));
+      .catch(() => { if (!cancelled) setMode("failed"); })
+      .finally(() => clearTimeout(timeout));
     return () => {
       cancelled = true;
+      controller.abort(); clearTimeout(timeout);
     };
-  }, [ideas, config.provider, config.model, config.apiKey]);
+  }, [ideas, config.provider, config.model, config.apiKey, analyze]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -107,7 +134,11 @@ export default function FluidGraph({
   }, [points, edges]);
 
   function pointerDown(event: React.PointerEvent) {
-    if ((event.target as HTMLElement).closest(".ocean-node")) return;
+    if (
+      (event.target as HTMLElement).closest(
+        "button, a, input, select, textarea, [role='button']",
+      )
+    ) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       active: true,
@@ -133,7 +164,9 @@ export default function FluidGraph({
 
   return (
     <section
+      ref={dialogRef}
       className="ocean-graph"
+      data-motion-panel data-motion-key="ocean" role="dialog" aria-modal="true" aria-label="想法关系海"
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
       onPointerUp={pointerUp}
@@ -143,7 +176,7 @@ export default function FluidGraph({
       <div className="ocean-noise" />
       <header className="ocean-header glass">
         <div>
-          <span>AI IDEA OCEAN</span>
+          <span>想法之间的连接</span>
           <h2>想法关系海</h2>
           <p>长按并拖动海面探索 · 点击想法查看详情</p>
         </div>
@@ -153,9 +186,18 @@ export default function FluidGraph({
             ? "真实大模型已完成关系分配"
             : mode === "loading"
               ? "AI 正在分析关系…"
-              : "本地语义引擎模式"}
+              : mode === 'failed' ? 'AI 调用失败 · 显示本地标签与方向连接' : "本地标签与方向连接"}
         </div>
-        <button onClick={onClose} aria-label="关闭全屏图谱">
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+          data-motion-close
+          aria-label="关闭全屏图谱"
+        >
           ×
         </button>
       </header>
@@ -177,14 +219,13 @@ export default function FluidGraph({
               <h3>{idea.title}</h3>
               <div>
                 <small>{idea.status}</small>
-                <b>{idea.confidence}</b>
               </div>
             </button>
           );
         })}
       </div>
       <aside className="ocean-legend glass">
-        <strong>关系类型</strong>
+        <strong>{edges.length ? '关系类型' : '暂无标签或方向相同的连接'}</strong>
         {[...new Set(edges.map((edge) => edge.type))]
           .slice(0, 6)
           .map((type, index) => (
@@ -201,51 +242,6 @@ export default function FluidGraph({
   );
 }
 
-function layoutPoints(ideas: GraphIdea[]): Point[] {
-  const count = Math.max(ideas.length, 1);
-  return ideas.map((idea, index) => {
-    const ring = Math.floor(index / 8);
-    const slot = index % 8;
-    const angle = (slot / Math.min(8, count)) * Math.PI * 2 + ring * 0.45;
-    const radius = 250 + ring * 260;
-    return {
-      id: idea.id,
-      x: innerSafeWidth() / 2 + Math.cos(angle) * radius,
-      y: innerSafeHeight() / 2 + Math.sin(angle) * radius,
-    };
-  });
-}
-function innerSafeWidth() {
-  return typeof window === "undefined" ? 1200 : window.innerWidth;
-}
-function innerSafeHeight() {
-  return typeof window === "undefined" ? 800 : window.innerHeight;
-}
-function fallbackEdges(ideas: GraphIdea[]): Edge[] {
-  const edges: Edge[] = [];
-  for (let i = 0; i < ideas.length; i++)
-    for (let j = i + 1; j < ideas.length; j++) {
-      const shared = ideas[i].tags.filter((tag) => ideas[j].tags.includes(tag));
-      if (shared.length)
-        edges.push({
-          sourceId: ideas[i].id,
-          targetId: ideas[j].id,
-          type: "主题相似",
-          reason: `共享 ${shared.join("、")}`,
-          strength: 0.68,
-        });
-    }
-  if (!edges.length && ideas.length > 1)
-    for (let i = 1; i < ideas.length; i++)
-      edges.push({
-        sourceId: ideas[0].id,
-        targetId: ideas[i].id,
-        type: "潜在互补",
-        reason: "等待模型进一步判断",
-        strength: 0.4,
-      });
-  return edges;
-}
 function validEdges(raw: unknown[], ideas: GraphIdea[]) {
   const ids = new Set(ideas.map((idea) => idea.id));
   return raw

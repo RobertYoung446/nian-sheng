@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getChatGPTUser } from "../../chatgpt-auth";
+import { readJsonRecord } from "../../account-auth";
 
 const providers = {
   openai: {
@@ -30,6 +31,7 @@ type AiRequest = {
     content?: string;
     summary?: string;
     risk?: string;
+    intent?: string;
   };
   question?: string;
   messages?: { role: "user" | "assistant"; content: string }[];
@@ -54,11 +56,14 @@ export async function GET() {
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
-  const input = (await request.json()) as AiRequest;
+  const record = await readJsonRecord(request, 100_000);
+  if (!record) return Response.json({ error: '请求格式无效' }, { status: 400 });
+  const input = record as AiRequest;
+  if (!['analyze','chat','relations'].includes(String(input.action))) return Response.json({error:'无效的 AI 操作'},{status:400});
   const requestedProvider =
     input.provider || (env.AI_PROVIDER as Provider) || "openai";
   const provider =
-    requestedProvider in providers ? requestedProvider : "openai";
+    Object.hasOwn(providers, requestedProvider) ? requestedProvider : "openai";
   const config = providers[provider];
   const clientKey = request.headers
     .get("authorization")
@@ -129,31 +134,31 @@ export async function POST(request: Request) {
 
 function buildPrompt(input: AiRequest) {
   if (input.action === "analyze") {
-    const content = input.idea?.content?.slice(0, 6000);
+    const content = typeof input.idea?.content === 'string' ? input.idea.content.slice(0,6000) : '';
     if (!content) return null;
     return [
       {
         role: "system",
         content:
-          "你是严格、务实的创新项目评审。不要迎合。只返回有效 JSON，不要代码围栏。字段必须是：title,summary,tags(字符串数组),feasibility,impact,clarity,confidence(均为0-100整数),risk,nextAction。结论必须具体、可验证。",
+          "你是个人想法的思考伙伴，帮助创作、学习和生活目标变成一个具体下一步。先理解意图，不默认采用商业需求验证或用户访谈。只返回有效 JSON，不要代码围栏。字段：title,summary,tags(字符串数组),feasibility,impact,clarity,confidence(均为0-100整数，仅作粗略建议，不代表客观成熟度),risk,nextAction。区分已知事实与待确认判断，不编造证据。",
       },
       { role: "user", content: `分析这个想法：\n${content}` },
     ];
   }
   if (input.action === "chat") {
     const idea = input.idea;
-    if (!idea || !input.question?.trim()) return null;
+    if (!idea || typeof idea.content !== 'string' || typeof idea.title !== 'string' || typeof input.question !== 'string' || !input.question.trim()) return null;
     return [
       {
         role: "system",
         content:
-          "你是用户的思想伙伴和建设性反方。围绕想法寻找隐含假设、反例和最低成本验证方式。用中文简洁回答，不迎合，不空泛，优先引用用户给出的具体信息。",
+          "你是个人用户的思考伙伴，服务创作、学习与生活目标。先理解用户意图，再按请求澄清、给出下一步或挑战假设。不要默认建议商业验证或访谈，不把所有想法都当创业项目。用中文简洁回答，引用已有信息，区分事实、建议和未知；不要编造证据。下一步必须小而具体，并有完成标准。",
       },
       {
         role: "user",
-        content: `想法：${idea.title}\n描述：${idea.content}\n已有风险：${idea.risk || "未知"}`,
+        content: `想法：${idea.title}\n方向：${idea.intent || '探索'}\n描述：${idea.content}\n已有风险：${idea.risk || "未知"}`,
       },
-      ...(input.messages || []).slice(-8),
+      ...(Array.isArray(input.messages) ? input.messages.filter(message=>message && ['user','assistant'].includes(message.role) && typeof message.content === 'string').slice(-8).map(message=>({...message,content:message.content.slice(0,3000)})) : []),
       { role: "user", content: input.question.slice(0, 3000) },
     ];
   }

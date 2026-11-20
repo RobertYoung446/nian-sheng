@@ -18,10 +18,7 @@ export type IdeaRow = {
   updated_at: number;
 };
 
-let ready = false;
-
 export async function ensureIdeasTable() {
-  if (ready) return;
   const db = env.DB;
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS ideas (
@@ -44,7 +41,6 @@ export async function ensureIdeasTable() {
     db.prepare('CREATE INDEX IF NOT EXISTS idx_ideas_user_updated ON ideas(user_id, updated_at DESC)'),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_ideas_user_active ON ideas(user_id, status) WHERE status != '已归档'"),
   ]);
-  ready = true;
 }
 
 export function analyzeIdea(content: string) {

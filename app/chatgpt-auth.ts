@@ -1,11 +1,13 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { getAccountUser } from './account-auth';
 
 export type ChatGPTUser = {
   userId: string;
   displayName: string;
   email: string;
   fullName: string | null;
+  authProvider: 'chatgpt' | 'email' | 'wechat';
 };
 
 const USER_ID_HEADER = 'oai-authenticated-user-id';
@@ -19,6 +21,8 @@ const SIGN_OUT_PATH = '/signout-with-chatgpt';
 const CALLBACK_PATH = '/callback';
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  const accountUser = await getAccountUser();
+  if (accountUser) return accountUser;
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
@@ -36,6 +40,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     displayName: fullName ?? email,
     email,
     fullName,
+    authProvider: 'chatgpt',
   };
 }
 
