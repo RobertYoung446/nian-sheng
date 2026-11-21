@@ -1,11 +1,20 @@
 'use client';
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { currentAction, progressLabel, type Idea, type Workspace } from '../../lib/workspace';
 
 export function Icon({ name }: { name: 'today' | 'ideas' | 'actions' | 'review' | 'plus' | 'settings' | 'close' }) {
   const paths = { today: 'M3 10 12 3l9 7v11h-6v-7H9v7H3Z', ideas: 'M5 4h14v16H5ZM9 8h6M9 12h6M9 16h4', actions: 'm4 12 5 5L20 6', review: 'M4 4v16h17M8 15l4-5 4 2 4-7', plus: 'M12 4v16M4 12h16', settings: 'M4 7h16M4 17h16M8 4v6M16 14v6', close: 'm6 6 12 12M6 18 18 6' };
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
+
+type NoticeValue = { notice: string; dismiss: () => void };
+export const NoticeContext = createContext<NoticeValue>({ notice: '', dismiss: () => {} });
+export function NoticeRegion({ floating = false }: { floating?: boolean }) {
+  const { notice, dismiss } = useContext(NoticeContext);
+  if (!notice) return null;
+  return <div className={floating ? 'ns-toast' : 'ns-inline-notice'} role="status"><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={dismiss}>×</button></div>;
+}
+
 export function useModalFocus(ref: RefObject<HTMLElement | null>, close: () => void) {
   const closeRef = useRef(close);
   useEffect(() => { closeRef.current = close; }, [close]);
@@ -29,7 +38,7 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>, close: () => v
 export function Modal({ title, close, children, wide = false }: { title: string; close: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLElement>(null);
   useModalFocus(ref, close);
-  return <div className="ns-scrim" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><section ref={ref} className={`ns-dialog ${wide ? 'ns-dialog-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}><header className="ns-dialog-head"><h2>{title}</h2><button className="ns-icon-button" onClick={close} aria-label="关闭"><Icon name="close" /></button></header>{children}</section></div>;
+  return <div className="ns-scrim" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><section ref={ref} className={`ns-dialog ${wide ? 'ns-dialog-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}><header className="ns-dialog-head"><h2>{title}</h2><button className="ns-icon-button" onClick={close} aria-label="关闭"><Icon name="close" /></button></header><NoticeRegion />{children}</section></div>;
 }
 export function IdeaCard({ idea, workspace, open }: { idea: Idea; workspace: Workspace; open: (id: string) => void }) {
   const action = currentAction(workspace, idea.id);

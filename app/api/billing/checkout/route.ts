@@ -1,3 +1,4 @@
+import { requireExpectedAccount } from '../../../account-bound';
 import { env } from 'cloudflare:workers';
 import Stripe from 'stripe';
 import { getChatGPTUser } from '../../../chatgpt-auth';
@@ -7,6 +8,8 @@ const stripe = () => new Stripe(env.STRIPE_SECRET_KEY!);
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: '请先登录' }, { status: 401 });
+  const mismatch = requireExpectedAccount(request, user.userId);
+  if (mismatch) return mismatch;
   if (env.ALLOW_NEW_SUBSCRIPTIONS !== 'true') {
     return Response.json({ error: '当前免费试用，暂未开放新订阅；已有订阅仍可管理' }, { status: 403 });
   }

@@ -4,6 +4,7 @@ import { emptyReviewDraft, readReviewDraft, writeReviewDraft } from '../lib/revi
 import { workspaceLocation, workspaceUrl } from '../lib/workspace-navigation.ts';
 import { layoutGraphPoints, localGraphEdges } from '../lib/workspace-graph.ts';
 import { syncFailureMessage } from '../lib/api-client.ts';
+import { syncStateAfterBroadcast } from '../lib/sync-broadcast.ts';
 
 test('回顾草稿刷新可恢复，游客与不同账户隔离，成功保存只清除当前草稿', () => {
   const values = new Map();
@@ -50,4 +51,14 @@ test('网络与超时失败明确提示本机操作保留，保留服务端具�
   assert.match(syncFailureMessage(new TypeError('Failed to fetch')),/暂时无法连接同步服务.*待同步操作仍保留/);
   assert.match(syncFailureMessage(new DOMException('aborted','AbortError')),/超时.*仍保留/);
   assert.equal(syncFailureMessage(new Error('云端容量已满，请导出备份')),'云端容量已满，请导出备份');
+});
+
+test('跨标签广播按本机队列和冲突更新同步状态，只有成功同步广播可标记已同步', () => {
+  const empty = { snapshot: {}, pending: [] };
+  assert.equal(syncStateAfterBroadcast(empty, 'updated'), null);
+  assert.equal(syncStateAfterBroadcast(empty, 'synced'), 'synced');
+  const pending = { ...empty, pending: [{ id: 'operation' }] };
+  assert.equal(syncStateAfterBroadcast(pending, 'synced'), 'pending');
+  assert.equal(syncStateAfterBroadcast(pending, 'updated'), 'pending');
+  assert.equal(syncStateAfterBroadcast({ ...pending, conflict: {} }, 'synced'), 'conflict');
 });

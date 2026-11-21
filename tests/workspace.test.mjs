@@ -49,3 +49,24 @@ test('超过 5 MB 的本机备份仍可预览并完整恢复，损坏文件给�
 });
 test('后补学习不改变完成时间和当前想法阶段',()=>{let w=captured();w=applyOperation(w,op('action.create',{ideaId:'idea-1',id:'a',description:'尝试',doneDefinition:'记录结果'},1));w=applyOperation(w,op('action.update',{ideaId:'idea-1',id:'a',status:'done',outcome:'试过了'},1));const completedAt=w.actions[0].completedAt;w=applyOperation(w,op('status',{ideaId:'idea-1',status:'已完成'},3));w=applyOperation(w,{...op('action.update',{ideaId:'idea-1',id:'a',status:'done',outcome:'试过了',learning:'需要调整方法'},2),at:at+86400000});assert.equal(w.actions[0].completedAt,completedAt);assert.equal(w.ideas[0].status,'已完成');assert.equal(w.actions[0].learning,'需要调整方法');});
 test('焦点优先用户置顶和实际行动',()=>{let w=captured();w=applyOperation(w,op('capture',{id:'idea-2',content:'另一个念头'}));w.ideas[0].pinned=true;assert.equal(focusIdea(w).id,'idea-2');w.ideas[0].pinned=false;w=applyOperation(w,op('action.create',{ideaId:'idea-1',id:'a',description:'尝试',doneDefinition:'记录'},1));assert.equal(focusIdea(w).id,'idea-1');});
+
+
+test('备份存在损坏的记录集合时拒绝导入，而非静默丢失数据', () => {
+  for (const field of ['actions', 'notes', 'events', 'reviews']) {
+    for (const bad of [null, {}, 'corrupted']) {
+      const backup = { ...emptyWorkspace(), [field]: bad };
+      assert.throws(() => parseBackup(backup), /备份.*格式无效/, field);
+    }
+  }
+  assert.equal(parseBackup([{ id: 'legacy-1', content: '旧数据' }]).ideas.length, 1);
+});
+
+
+test('版本 2 备份缺失记录集合时拒绝恢复，旧版缺省字段仍兼容', () => {
+  for (const field of ['actions', 'notes', 'events', 'reviews']) {
+    const partial = { ...emptyWorkspace() };
+    delete partial[field];
+    assert.throws(() => parseBackup(partial), /备份.*格式无效/, field);
+  }
+  assert.deepEqual(parseBackup({ ideas: [{ id: 'legacy-missing', content: '旧想法' }] }).reviews, []);
+});

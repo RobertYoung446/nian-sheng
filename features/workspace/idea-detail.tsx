@@ -12,7 +12,7 @@ const templates = {
   学习: ['练习一个具体知识点，并独立完成一道例题', '不看参考独立完成一次，并记录卡住的地方'],
   生活: ['在下一个合适的时刻，尝试一次新的做法', '实际尝试一次，记录体验及是否愿意继续'],
 };
-export default function IdeaDetail({ idea, workspace, close, run, demo, config, aiEnabled, notify, scope, onlineAccount }: { idea: Idea; workspace: Workspace; close: () => void; run: Run; demo: boolean; config: AiConfig; aiEnabled: boolean; notify: (message: string) => void; scope: string; onlineAccount: boolean }) {
+export default function IdeaDetail({ idea, workspace, close, run, demo, config, aiEnabled, notify, scope, onlineAccount, accountId }: { idea: Idea; workspace: Workspace; close: () => void; run: Run; demo: boolean; config: AiConfig; aiEnabled: boolean; notify: (message: string) => void; scope: string; onlineAccount: boolean; accountId?: string }) {
   const [tab, setTab] = useState<'next' | 'edit' | 'notes' | 'ai'>('next');
   const [edit, setEdit] = useState({ title: idea.title, content: idea.content, tags: idea.tags.join('，'), intent: idea.intent });
   const [editVersion, setEditVersion] = useState(idea.version);
@@ -59,7 +59,7 @@ export default function IdeaDetail({ idea, workspace, close, run, demo, config, 
   async function ask() {
     await execute(async () => {
       const context = workspace.actions.filter(a=>a.ideaId===idea.id && a.status==='done').slice(-4).map(a=>`${a.description}；结果：${a.outcome}；学习：${a.learning}`).join('\n').slice(0,5000);
-      const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) }, body: JSON.stringify({ action: 'chat', provider: config.provider, model: config.model, idea:{...idea,content:`${idea.content.slice(0,12000)}\n\n已完成的行动记录：\n${context}`}, question: `${mode}：${question || '请根据当前想法给出一个具体建议'}` }), signal: AbortSignal.timeout(50000) });
+      const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(accountId ? { 'X-Niansheng-Account': encodeURIComponent(accountId) } : {}), ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}) }, body: JSON.stringify({ action: 'chat', provider: config.provider, model: config.model, idea:{...idea,content:`${idea.content.slice(0,12000)}\n\n已完成的行动记录：\n${context}`}, question: `${mode}：${question || '请根据当前想法给出一个具体建议'}` }), signal: AbortSignal.timeout(50000) });
       const result = await readApi(response);
       if (!response.ok) throw new Error(apiMessage(result, 'AI 暂不可用；记录与行动仍可继续'));
       if (typeof result.reply !== 'string') throw new Error('模型返回格式无效，请重试');
@@ -69,7 +69,7 @@ export default function IdeaDetail({ idea, workspace, close, run, demo, config, 
   }
   async function research() {
     await execute(async()=>{
-      const response=await fetch(`/api/research?q=${encodeURIComponent(researchTerm)}`,{signal:AbortSignal.timeout(15000)});
+      const response=await fetch(`/api/research?q=${encodeURIComponent(researchTerm)}`,{headers: accountId ? { 'X-Niansheng-Account': encodeURIComponent(accountId) } : {},signal:AbortSignal.timeout(15000)});
       const result=await readApi(response);
       if(!response.ok)throw new Error(apiMessage(result,'暂时无法获取公开资料'));
       const items=Array.isArray(result.items)?result.items:[];

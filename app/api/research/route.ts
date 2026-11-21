@@ -1,4 +1,5 @@
 import { getChatGPTUser } from '../../chatgpt-auth';
+import { requireExpectedAccount } from '../../account-bound';
 import { safeUrl } from '../../../lib/workspace';
 
 function decodeXml(value: string) {
@@ -8,6 +9,8 @@ function decodeXml(value: string) {
 export async function GET(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: '请先登录' }, { status: 401 });
+  const mismatch = requireExpectedAccount(request, user.userId);
+  if (mismatch) return mismatch;
   const query = new URL(request.url).searchParams.get('q')?.slice(0,120);
   if (!query) return Response.json({ items: [] });
   try {

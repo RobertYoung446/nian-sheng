@@ -1,3 +1,4 @@
+import { requireExpectedAccount } from '../../../account-bound';
 import { env } from 'cloudflare:workers';
 import Stripe from 'stripe';
 import { getChatGPTUser } from '../../../chatgpt-auth';
@@ -6,6 +7,8 @@ import { subscriptionForUser } from '../../../../db/billing';
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: '请先登录' }, { status: 401 });
+  const mismatch = requireExpectedAccount(request, user.userId);
+  if (mismatch) return mismatch;
   if (!env.STRIPE_SECRET_KEY) return Response.json({ error: 'Stripe 尚未配置' }, { status: 503 });
   const subscription = await subscriptionForUser(user.userId);
   if (!subscription?.stripe_customer_id) {

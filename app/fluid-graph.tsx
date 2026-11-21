@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useModalFocus } from '../features/workspace/components';
+import { NoticeRegion, useModalFocus } from '../features/workspace/components';
 import { layoutGraphPoints, localGraphEdges } from '../lib/workspace-graph';
 
 type GraphIdea = {
@@ -38,12 +38,14 @@ export default function FluidGraph({
   onClose,
   onOpen,
   analyze = true,
+  accountId,
 }: {
   ideas: GraphIdea[];
   config: AiConfig;
   onClose: () => void;
   onOpen: (idea: GraphIdea) => void;
   analyze?: boolean;
+  accountId?: string;
 }) {
   const dialogRef = useRef<HTMLElement>(null);
   useModalFocus(dialogRef, onClose);
@@ -75,6 +77,7 @@ export default function FluidGraph({
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
+        ...(accountId ? { "X-Niansheng-Account": encodeURIComponent(accountId) } : {}),
         ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
       },
       body: JSON.stringify({
@@ -102,7 +105,7 @@ export default function FluidGraph({
       cancelled = true;
       controller.abort(); clearTimeout(timeout);
     };
-  }, [ideas, config.provider, config.model, config.apiKey, analyze]);
+  }, [ideas, config.provider, config.model, config.apiKey, analyze, accountId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -200,6 +203,7 @@ export default function FluidGraph({
         >
           ×
         </button>
+        <NoticeRegion />
       </header>
       <div className="ocean-world" ref={worldRef}>
         {points.map((point, index) => {

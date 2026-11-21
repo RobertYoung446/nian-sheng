@@ -57,6 +57,9 @@ export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const record = await readJsonRecord(request, 100_000);
+  const expected = request.headers.get('X-Niansheng-Account');
+  if (!expected) return Response.json({ code: 'UPGRADE_REQUIRED', message: '念生已升级，请刷新页面后重试' }, { status: 428 });
+  if (expected !== encodeURIComponent(user.userId)) return Response.json({ code: 'ACCOUNT_CHANGED', message: '登录账户已切换，请重新登录原账户后使用 AI' }, { status: 401 });
   if (!record) return Response.json({ error: '请求格式无效' }, { status: 400 });
   const input = record as AiRequest;
   if (!['analyze','chat','relations'].includes(String(input.action))) return Response.json({error:'无效的 AI 操作'},{status:400});

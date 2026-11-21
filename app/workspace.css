@@ -15,3 +15,11 @@
   .ocean-header > button { grid-column: 2; grid-row: 1; margin: 0; }
   .ocean-node { width: 230px; }
 }
+
+/* Notices stay in the dialog flow so they cannot cover controls. */
+.ns-inline-notice{display:flex;align-items:flex-start;gap:12px;margin:12px 0;padding:12px 14px;border-radius:12px;background:#1e4734;color:#fff;font-size:13px;line-height:1.5}
+.ns-inline-notice span{flex:1;min-width:0;overflow-wrap:anywhere}
+.ns-app .ns-inline-notice button{flex:none;min-width:36px;min-height:36px;padding:0;border:0;background:transparent;color:#fff;font-size:22px}
+.ocean-header:has(.ns-inline-notice){height:auto;flex-wrap:wrap}
+.ocean-header .ns-inline-notice{width:100%;margin:0}
+@media(max-width:600px){.ocean-header .ns-inline-notice{grid-column:1/-1;grid-row:3}}

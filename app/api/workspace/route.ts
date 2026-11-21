@@ -4,9 +4,17 @@ import { readWorkspace, writeOperation } from '../../../db/workspace';
 import { WorkspaceError, type Operation } from '../../../lib/workspace';
 
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'private, no-store' } });
-export async function GET() {
+function accountMismatch(request: Request, userId: string): Response | null {
+  const expected = request.headers.get('X-Niansheng-Account');
+  if (!expected) return json({ code: 'UPGRADE_REQUIRED', message: '念生已升级，请刷新页面后继续；本机待同步记录会保留' }, 428);
+  if (expected !== encodeURIComponent(userId)) return json({ code: 'ACCOUNT_CHANGED', message: '登录账户已切换；本机记录仍在，请重新登录原账户后同步' }, 401);
+  return null;
+}
+export async function GET(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return json({ code: 'AUTH', message: '请重新登录；本机记录与待同步操作会保留' }, 401);
+  const mismatch = accountMismatch(request, user.userId);
+  if (mismatch) return mismatch;
   try { return json(await readWorkspace(user.userId)); }
   catch { return json({ code: 'STORAGE', message: '暂时无法读取云端空间，请稍后重试' }, 503); }
 }
@@ -14,6 +22,8 @@ export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return json({ code: 'AUTH', message: '请重新登录；本机记录与待同步操作会保留' }, 401);
   const value = await readJsonRecord(request, 1_600_000);
+  const mismatch = accountMismatch(request, user.userId);
+  if (mismatch) return mismatch;
   if (!value || !value.operation || typeof value.operation !== 'object') return json({ code: 'INVALID', message: '操作格式无效' }, 400);
   try { return json(await writeOperation(user.userId, value.operation as Operation)); }
   catch (error) {

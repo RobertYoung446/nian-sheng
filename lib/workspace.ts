@@ -90,6 +90,9 @@ export function parseBackup(value: unknown): Workspace {
   if (v.schemaVersion !== undefined && v.schemaVersion !== 2) throw new WorkspaceError('备份版本暂不支持，请先保留原文件');
   const rawIdeas = Array.isArray(value) ? value : v.ideas;
   assert(Array.isArray(rawIdeas), '这不是有效的念生备份');
+  for (const [key, label] of Object.entries({ actions: '行动', notes: '记录', events: '历史事件', reviews: '复盘' })) {
+    assert((v.schemaVersion !== 2 && !(key in v)) || Array.isArray(v[key]), `备份中的${label}格式无效，请保留原文件`);
+  }
   const ideas = (rawIdeas as unknown[]).map(i => normalizeIdea(i));
   assert(ideas.every(i => !i.id.startsWith('sample-')), '示例数据不能导入个人空间');
   assert(new Set(ideas.map(i => i.id)).size === ideas.length, '备份中存在重复想法 ID');

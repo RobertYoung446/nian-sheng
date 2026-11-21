@@ -1,10 +1,13 @@
+import { requireExpectedAccount } from '../../../account-bound';
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '../../../chatgpt-auth';
 import { publicSubscription, subscriptionForUser } from '../../../../db/billing';
 
-export async function GET() {
+export async function GET(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: '请先登录' }, { status: 401 });
+  const mismatch = requireExpectedAccount(request, user.userId);
+  if (mismatch) return mismatch;
   const subscription = await subscriptionForUser(user.userId);
   return Response.json({
     subscription: publicSubscription(subscription),
