@@ -176,3 +176,25 @@ test('账户切换后公开资料查询在外部检索前被拒绝', { skip: !ba
   assert.equal(current.status, 200);
   assert.deepEqual((await current.json()).items, []);
 });
+
+test('API：大备份分段保存，超出容量时保留上次提交',{skip:!base,timeout:60000},async()=>{
+  const cookie = await account();
+  const content = '念'.repeat(2700) + '🌱';
+  const ideas = Array.from({length:900}, (_, index) => ({id:`large-${index}`, title:`备份 ${index}`, content}));
+  const workspace = {schemaVersion:2, ideas, actions:[], notes:[], events:[], reviews:[]};
+  const importing = operation('import',{workspace});
+  const first = await request(cookie,importing);
+  assert.equal(first.status,200,first.status === 200 ? undefined : await first.text());
+  const saved = await first.json();
+  assert.ok(Buffer.byteLength(JSON.stringify(saved.workspace)) > 7_500_000);
+  assert.equal(saved.workspace.ideas.length,900);
+  assert.equal(saved.workspace.ideas.at(-1).content,content);
+
+  const extra = {...workspace, ideas: ideas.slice(0,100).map((idea,index)=>({...idea,id:`extra-${index}`}))};
+  const rejected = await request(cookie,operation('import',{workspace:extra}));
+  assert.equal(rejected.status,400);
+  assert.equal((await rejected.json()).code,'CAPACITY');
+  const loaded = await (await fetch(`${base}/api/workspace`,{headers:{Cookie:cookie,...identity(cookie)}})).json();
+  assert.equal(loaded.revision,saved.revision);
+  assert.deepEqual(loaded.workspace,saved.workspace);
+});

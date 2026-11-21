@@ -43,6 +43,13 @@
       "when": 1792148660392,
       "tag": "0005_fuzzy_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795284220185,
+      "tag": "0006_workspace_document_parts",
+      "breakpoints": true
     }
   ]
 }

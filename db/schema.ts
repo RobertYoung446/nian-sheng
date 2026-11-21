@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const workspaceDocuments = sqliteTable('workspace_documents', {
   userId: text('user_id').primaryKey(),
@@ -8,6 +8,12 @@ export const workspaceDocuments = sqliteTable('workspace_documents', {
   updatedAt: integer('updated_at').notNull(),
   lastOperation: text('last_operation').notNull().default(''),
 });
+
+export const workspaceDocumentParts = sqliteTable('workspace_document_parts', {
+  userId: text('user_id').notNull().references(() => workspaceDocuments.userId, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  payload: text('payload').notNull(),
+}, table => [primaryKey({ columns: [table.userId, table.position] })]);
 
 export const workspaceReceipts = sqliteTable('workspace_receipts', {
   id: text('id').primaryKey(),
