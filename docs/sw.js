@@ -1,4 +1,4 @@
-const CACHE_NAME = 'niansheng-v2-4a6832be51a2';
+const CACHE_NAME = 'niansheng-v2-b925415f414e';
 const SHELL_ROOT = new URL('./', self.location.href);
 // Cache the canonical directory URL. Static hosts redirect index.html to this
 // address; redirected cached responses cannot satisfy offline navigations.
